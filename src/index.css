@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Light Theme - Aesthetic Beige Paper */
+  --bg-color: #f6f4ed;
+  --bg-card: #ffffff;
+  --bg-card-sub: #f0ede4;
+  --bg-input: #eceae1;
+  --border-color: #e0ded5;
+  --border-sub: #d3d1c6;
+  --text-color: #2e3037;
+  --text-muted: #6b6f79;
+  --shadow-color: rgba(130, 126, 115, 0.12);
+  --bg-header: #eeece3;
+  --bg-table-header: #eeece3;
+  --radial-green: rgba(16, 185, 129, 0.05);
+  --radial-cyan: rgba(6, 182, 212, 0.05);
+  --grid-line: rgba(46, 48, 55, 0.02);
+}
+
+.dark {
+  /* Dark Theme - Cyberpunk Slate */
+  --bg-color: #090a0f;
+  --bg-card: rgba(17, 18, 25, 0.65);
+  --bg-card-sub: rgba(0, 0, 0, 0.25);
+  --bg-input: rgba(0, 0, 0, 0.35);
+  --border-color: rgba(255, 255, 255, 0.06);
+  --border-sub: rgba(255, 255, 255, 0.04);
+  --text-color: #e2e8f0;
+  --text-muted: #9ca3af;
+  --shadow-color: rgba(0, 0, 0, 0.37);
+  --bg-header: rgba(0, 0, 0, 0.4);
+  --bg-table-header: #06070a;
+  --radial-green: rgba(16, 185, 129, 0.04);
+  --radial-cyan: rgba(6, 182, 212, 0.04);
+  --grid-line: rgba(255, 255, 255, 0.003);
+}
+
+@layer base {
+  html, body, #root {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    @apply antialiased font-sans select-none transition-colors duration-200;
+    background-image: 
+      radial-gradient(at 0% 0%, var(--radial-green) 0px, transparent 40%),
+      radial-gradient(at 100% 0%, var(--radial-cyan) 0px, transparent 40%),
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 24px 24px, 24px 24px;
+  }
+}
+
+/* Glassmorphism style bindings mapping to theme variables */
+.glass-panel {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
+  @apply rounded-xl shadow-xl transition-all duration-200;
+  box-shadow: 0 8px 32px 0 var(--shadow-color);
+}
+
+.glass-input {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
+  @apply rounded px-2 py-1 text-sm outline-none focus:border-emerald-500/40 transition-colors duration-150;
+}
+
+.glass-button {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
+  @apply hover:opacity-90 rounded px-3 py-1.5 text-sm font-medium transition-all duration-150 outline-none flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-40 disabled:pointer-events-none;
+}
+
+/* Glow effects */
+.glow-accent {
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.25);
+}
+
+.glow-canopen {
+  box-shadow: 0 0 15px rgba(245, 158, 11, 0.25);
+}
+
+.glow-j1939 {
+  box-shadow: 0 0 15px rgba(6, 182, 212, 0.25);
+}
+
+/* Chrome scrollbar custom overrides */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+  @apply opacity-60;
+}
+
+/* Grid workspace layout */
+.workspace-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  grid-template-rows: 64px 1fr;
+  width: 100vw;
+  height: 100vh;
+}
