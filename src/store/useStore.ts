@@ -330,8 +330,7 @@ export const useStore = create<CanStore>((set, get) => {
             set({ kvaserStatus: 'offline' });
           }
         } else {
-          // Web Browser Fallback: start False CAN Simulation loop
-          state.startSimulation();
+          // Web Browser Fallback: open virtual channel silently
           set({ kvaserStatus: 'simulated' });
         }
       } else {

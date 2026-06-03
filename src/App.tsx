@@ -7,6 +7,7 @@ import { CanTransmitter } from './components/CanTransmitter';
 import { LivePlotter } from './components/LivePlotter';
 import { ProtocolDiagnostics } from './components/ProtocolDiagnostics';
 import { FalseCanSender } from './components/FalseCanSender';
+import { checkForUpdates } from './lib/updater';
 import { useStore } from './store/useStore';
 
 const App: React.FC = () => {
@@ -24,6 +25,11 @@ const App: React.FC = () => {
       }
     }
   }, [theme]);
+
+  // Check for app updates once on startup (no-op outside Tauri)
+  React.useEffect(() => {
+    checkForUpdates({ silent: true });
+  }, []);
 
   const PANEL_COMPONENTS: Record<string, React.ReactNode> = {
     deviceManager: <DeviceManager />,

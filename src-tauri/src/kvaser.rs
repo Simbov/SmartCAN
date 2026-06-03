@@ -155,9 +155,6 @@ pub fn start_kvaser(app: AppHandle, baud_rate: u32, state: State<'_, KvaserState
 
     // Spawning listener thread
     thread::spawn(move || {
-        let mut sim_time = 0;
-        let mut loop_counter = 0;
-
         if has_real_kvaser {
             if let Some(canlib) = get_canlib() {
                 while is_running.load(Ordering::SeqCst) {
@@ -203,43 +200,9 @@ pub fn start_kvaser(app: AppHandle, baud_rate: u32, state: State<'_, KvaserState
                 }
             }
         } else {
-            // Simulated telemetry generator mimicking Kvaser hardware
+            // Idle virtual bus loop - stays silent until messages are sent
             while is_running.load(Ordering::SeqCst) {
-                thread::sleep(Duration::from_millis(50));
-                sim_time += 50;
-                loop_counter += 1;
-
-                // Let's generate a simulated sensor frame every 100ms
-                if loop_counter % 2 == 0 {
-                    let rpm = 2000.0 + 800.0 * ((sim_time as f64 / 1000.0) * 0.5).sin();
-                    let raw_rpm = (rpm / 0.125) as u32;
-
-                    let mut data = vec![0u8; 8];
-                    // Pack rpm into byte 3 and 4 (little endian)
-                    data[3] = (raw_rpm & 0xFF) as u8;
-                    data[4] = ((raw_rpm >> 8) & 0xFF) as u8;
-                    
-                    let frame = TauriCanFrame {
-                        timestamp: sim_time,
-                        id: 0x0CF00401, // J1939 EEC1 frame
-                        dlc: 8,
-                        data,
-                    };
-
-                    let _ = app.emit("kvaser-frame", frame);
-                }
-
-                // Generates standard heartbeats if protocol is CANopen
-                if loop_counter % 20 == 0 {
-                    // Node 1 Pre-operational heartbeat
-                    let frame = TauriCanFrame {
-                        timestamp: sim_time,
-                        id: 0x701, // Heartbeat Node 1
-                        dlc: 1,
-                        data: vec![0x7F],
-                    };
-                    let _ = app.emit("kvaser-frame", frame);
-                }
+                thread::sleep(Duration::from_millis(100));
             }
         }
 
