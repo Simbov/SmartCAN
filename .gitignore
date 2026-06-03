@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Developer & agent guidelines
+DEVELOPER_GUIDE.md
+
