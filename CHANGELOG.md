@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-06-04
+
 ### Added
 - **Manual Updater Trigger**: Added a "Check Updates" button to the header toolbar, allowing users to trigger a manual check and receive visible feedback dialogs when running under Tauri.
 
