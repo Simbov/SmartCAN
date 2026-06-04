@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.1] - 2026-06-04
+
 ### Added
 - **Dynamic Device Name Display**: Queries and shows the name of the connected Kvaser channel (e.g., `Kvaser Leaf Light v2 (Ch 0)`) in the Interface header info.
 - **Connection Error Dialog**: Detects failed connections, driver/DLL loading errors, and guides the user to retry or enter Simulation Mode.
