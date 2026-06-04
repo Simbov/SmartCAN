@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
-import { Play, Square, Activity, Trash2, Cpu, Sun, Moon, LayoutGrid } from 'lucide-react';
+import { Play, Square, Activity, Trash2, Cpu, Sun, Moon, LayoutGrid, RefreshCw } from 'lucide-react';
+import { isTauriEnv } from '../lib/tauriAdapter';
 
 export const Header: React.FC = () => {
   const {
@@ -219,6 +220,22 @@ export const Header: React.FC = () => {
             </>
           )}
         </div>
+
+        {/* Update Checker (Tauri Desktop Only) */}
+        {isTauriEnv() && (
+          <button
+            onClick={() => {
+              import('../lib/updater').then(({ checkForUpdates }) => {
+                checkForUpdates({ silent: false });
+              });
+            }}
+            className="glass-button text-xs"
+            title="Check for Software Updates"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Check Updates</span>
+          </button>
+        )}
 
         {/* Theme Toggle */}
         <button
