@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Physical Device Prioritization**: Read channel capabilities (`canCHANNELDATA_CHANNEL_CAP`) to explicitly skip virtual channels during physical scan phase. This prevents default virtual channels from preempting plugged-in physical devices (like Kvaser Leaf v3).
+
 ## [0.0.1] - 2026-06-04
 
 ### Added

@@ -177,6 +177,19 @@ pub fn start_kvaser(app: AppHandle, baud_rate: u32, state: State<'_, KvaserState
     unsafe {
         // 1. Try to find a physical channel first (flag = 0)
         for ch in 0..num_channels {
+            // Check if the channel has the virtual capability flag (canCHANNEL_CAP_VIRTUAL = 0x00010000)
+            let mut caps = 0u32;
+            let cap_status = (canlib.can_get_channel_data)(
+                ch,
+                1, // canCHANNELDATA_CHANNEL_CAP
+                &mut caps as *mut _ as *mut std::ffi::c_void,
+                std::mem::size_of::<u32>(),
+            );
+            if cap_status >= 0 && (caps & 0x00010000) != 0 {
+                // Skip virtual channels in the physical scan phase
+                continue;
+            }
+
             let handle = (canlib.can_open_channel)(ch, 0);
             if handle >= 0 {
                 let freq_preset = match baud_rate {
