@@ -7,11 +7,15 @@ import { CanTransmitter } from './components/CanTransmitter';
 import { LivePlotter } from './components/LivePlotter';
 import { ProtocolDiagnostics } from './components/ProtocolDiagnostics';
 import { FalseCanSender } from './components/FalseCanSender';
+import { ConnectionErrorModal } from './components/ConnectionErrorModal';
 import { checkForUpdates } from './lib/updater';
 import { useStore } from './store/useStore';
 
+import { Activity, Database } from 'lucide-react';
+
 const App: React.FC = () => {
   const { visiblePanels, panelPositions, theme } = useStore();
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = React.useState<'monitor' | 'dbc'>('monitor');
 
   // Sync html element theme classes
   React.useEffect(() => {
@@ -33,7 +37,6 @@ const App: React.FC = () => {
 
   const PANEL_COMPONENTS: Record<string, React.ReactNode> = {
     deviceManager: <DeviceManager />,
-    dbcManager: <DbcManager />,
     liveViewer: <LiveViewer />,
     livePlotter: <LivePlotter />,
     transmitter: <CanTransmitter />,
@@ -63,59 +66,96 @@ const App: React.FC = () => {
       {/* 1. Header connection bar */}
       <Header />
 
+      {/* Connection Error Modal Overlay */}
+      <ConnectionErrorModal />
+
+      {/* Workspace Tab Bar */}
+      <div className="flex px-6 pt-2 gap-2 border-b border-[var(--border-color)] bg-black/5 backdrop-blur-md">
+        <button
+          onClick={() => setActiveWorkspaceTab('monitor')}
+          className={`flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-t-lg border-t border-x transition-all duration-150 ${
+            activeWorkspaceTab === 'monitor'
+              ? 'bg-[var(--bg-card)] text-[var(--text-color)] border-[var(--border-color)] shadow-sm'
+              : 'bg-transparent text-[var(--text-muted)] border-transparent hover:text-[var(--text-color)]'
+          }`}
+        >
+          <Activity className="w-3.5 h-3.5" />
+          <span>Live Monitor Workspace</span>
+        </button>
+        <button
+          onClick={() => setActiveWorkspaceTab('dbc')}
+          className={`flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-t-lg border-t border-x transition-all duration-150 ${
+            activeWorkspaceTab === 'dbc'
+              ? 'bg-[var(--bg-card)] text-[var(--text-color)] border-[var(--border-color)] shadow-sm'
+              : 'bg-transparent text-[var(--text-muted)] border-transparent hover:text-[var(--text-color)]'
+          }`}
+        >
+          <Database className="w-3.5 h-3.5" />
+          <span>DBC Database Manager</span>
+        </button>
+      </div>
+
       {/* 2. Workspace container */}
-      <main className={`flex-1 overflow-hidden grid ${mainGridCols} gap-4 p-4 min-h-0`}>
-        {hasSidebar && (
-          <section className="flex flex-col gap-4 overflow-hidden min-h-0">
-            {sidebarKeys.map(key => (
-              <div key={key} className="flex-1 min-h-[150px] overflow-hidden">
-                {PANEL_COMPONENTS[key]}
-              </div>
-            ))}
-          </section>
-        )}
-
-        {(hasTop || hasBottom) ? (
-          <section className="flex flex-col gap-4 overflow-hidden min-h-0">
-            {hasTop && (
-              <div 
-                className="grid gap-4 overflow-hidden min-h-0"
-                style={{
-                  gridTemplateColumns: `repeat(${mainTopKeys.length}, minmax(0, 1fr))`,
-                  flex: hasBottom ? '1.2' : '1',
-                  height: hasBottom ? 'auto' : '100%'
-                }}
-              >
-                {mainTopKeys.map(key => (
-                  <div key={key} className="overflow-hidden h-full">
-                    {PANEL_COMPONENTS[key]}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {hasBottom && (
-              <div 
-                className="grid gap-4 overflow-hidden min-h-0"
-                style={{
-                  gridTemplateColumns: `repeat(${mainBottomKeys.length}, minmax(0, 1fr))`,
-                  flex: '1',
-                  height: hasTop ? 'auto' : '100%'
-                }}
-              >
-                {mainBottomKeys.map(key => (
-                  <div key={key} className="overflow-hidden h-full">
-                    {PANEL_COMPONENTS[key]}
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
+      <main className="flex-1 overflow-hidden min-h-0 flex flex-col">
+        {activeWorkspaceTab === 'dbc' ? (
+          <div className="flex-1 p-4 overflow-hidden min-h-0">
+            <DbcManager />
+          </div>
         ) : (
-          <div className="flex flex-col items-center justify-center text-center p-8 glass-panel h-full">
-            <span className="text-sm text-[var(--text-muted)] font-medium">
-              No panels are currently visible. Click "Customize Layout" in the header to show panels.
-            </span>
+          <div className={`flex-1 overflow-hidden grid ${mainGridCols} gap-4 p-4 min-h-0`}>
+            {hasSidebar && (
+              <section className="flex flex-col gap-4 overflow-hidden min-h-0">
+                {sidebarKeys.map(key => (
+                  <div key={key} className="flex-1 min-h-[150px] overflow-hidden">
+                    {PANEL_COMPONENTS[key]}
+                  </div>
+                ))}
+              </section>
+            )}
+
+            {(hasTop || hasBottom) ? (
+              <section className="flex flex-col gap-4 overflow-hidden min-h-0">
+                {hasTop && (
+                  <div 
+                    className="grid gap-4 overflow-hidden min-h-0"
+                    style={{
+                      gridTemplateColumns: `repeat(${mainTopKeys.length}, minmax(0, 1fr))`,
+                      flex: hasBottom ? '1.2' : '1',
+                      height: hasBottom ? 'auto' : '100%'
+                    }}
+                  >
+                    {mainTopKeys.map(key => (
+                      <div key={key} className="overflow-hidden h-full">
+                        {PANEL_COMPONENTS[key]}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {hasBottom && (
+                  <div 
+                    className="grid gap-4 overflow-hidden min-h-0"
+                    style={{
+                      gridTemplateColumns: `repeat(${mainBottomKeys.length}, minmax(0, 1fr))`,
+                      flex: '1',
+                      height: hasTop ? 'auto' : '100%'
+                    }}
+                  >
+                    {mainBottomKeys.map(key => (
+                      <div key={key} className="overflow-hidden h-full">
+                        {PANEL_COMPONENTS[key]}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            ) : (
+              <div className="flex flex-col items-center justify-center text-center p-8 glass-panel h-full w-full">
+                <span className="text-sm text-[var(--text-muted)] font-medium">
+                  No panels are currently visible. Click "Customize Layout" in the header to show panels.
+                </span>
+              </div>
+            )}
           </div>
         )}
       </main>

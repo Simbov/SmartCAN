@@ -1,5 +1,30 @@
-# Logs
-logs
+# Dependency Directories
+/node_modules/
+
+# Production Builds
+/dist/
+/dist-ssr/
+/build/
+/out/
+
+# Rust / Cargo / Tauri Build Artifacts
+/src-tauri/target/
+/src-tauri/gen/
+/src-tauri/bin/
+/src-tauri/bindings/
+
+# IDEs and Text Editors
+/.vscode/
+/.idea/
+/*.suo
+/*.ntvs*
+/*.njsproj
+/*.sln
+/*.sw?
+.eslintcache
+
+# Logs and Debug files
+/logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -7,22 +32,16 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# System and OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local Configuration Overrides
+.env
+.env.local
+.env.*.local
 *.local
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# Developer & agent guidelines
-DEVELOPER_GUIDE.md
-
+# Developer & Agent Guidelines
+/DEVELOPER_GUIDE.md

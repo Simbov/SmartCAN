@@ -1,8 +1,9 @@
 import React, { useState, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import type { CanLog } from '../store/useStore';
-import { Play, Pause, Trash2, Download, Upload, Filter, ChevronDown, ChevronRight, Eye } from 'lucide-react';
+import { Play, Pause, Trash2, Download, Upload, Filter, ChevronDown, ChevronRight, Eye, Plus } from 'lucide-react';
 import { saveTextFile } from '../lib/tauriAdapter';
+import { parseJ1939Id } from '../lib/j1939';
 
 export const LiveViewer: React.FC = () => {
   const {
@@ -13,11 +14,23 @@ export const LiveViewer: React.FC = () => {
     importLogsCsv,
     togglePlotSignal,
     plotSignals,
-    protocol
+    protocol,
+    devices,
+    saveMessageToActiveDbc,
+    dbcs,
+    activeDbcName
   } = useStore();
 
   const [filterText, setFilterText] = useState('');
   const [expandedLogIdx, setExpandedLogIdx] = useState<number | null>(null);
+  const [showNicknames, setShowNicknames] = useState(true);
+  const [showInterpreted, setShowInterpreted] = useState(true);
+  
+  // Unrecognized message save form state
+  const [unrecognizedMsg, setUnrecognizedMsg] = useState<{ id: number; dlc: number } | null>(null);
+  const [newMsgName, setNewMsgName] = useState('');
+  const [newMsgSender, setNewMsgSender] = useState('Vector_XXX');
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Helper to convert data bytes into a spaces-separated hex string
@@ -25,6 +38,11 @@ export const LiveViewer: React.FC = () => {
     return Array.from(data)
       .map((b) => b.toString(16).padStart(2, '0').toUpperCase())
       .join(' ');
+  };
+
+  const getNickname = (nodeId: number): string => {
+    const dev = devices.find((d) => d.nodeId === nodeId);
+    return dev ? dev.name : `Node ${nodeId}`;
   };
 
   // Filter logs based on search string
@@ -44,13 +62,20 @@ export const LiveViewer: React.FC = () => {
   const handleExportCsv = () => {
     if (logs.length === 0) return;
     
-    let csv = 'Time(ms),Dir,ID(Hex),DLC,Data(Hex),Name\n';
+    let csv = 'Time,Ident,Flags,DLC,Data(0),Data(1),Data(2),Data(3),Data(4),Data(5),Data(6),Data(7)\n';
     logs.forEach((log) => {
-      const idHex = log.id.toString(16).toUpperCase();
-      const dataHex = Array.from(log.data)
-        .map((b) => b.toString(16).padStart(2, '0').toUpperCase())
-        .join('');
-      csv += `${log.timestamp},${log.direction},${idHex},${log.dlc},${dataHex},"${log.name}"\n`;
+      const timeSec = (log.timestamp / 1000).toFixed(6);
+      const idHex = `0x${log.id.toString(16).toUpperCase()}`;
+      const flags = log.direction === 'TX' ? 'Tx' : 'Rx';
+      
+      const dataCols = Array.from({ length: 8 }, (_, i) => {
+        if (i < log.data.length) {
+          return `0x${log.data[i].toString(16).padStart(2, '0').toUpperCase()}`;
+        }
+        return '';
+      }).join(',');
+
+      csv += `${timeSec},${idHex},${flags},${log.dlc},${dataCols}\n`;
     });
 
     const filename = `can_dump_${Date.now()}.csv`;
@@ -73,6 +98,16 @@ export const LiveViewer: React.FC = () => {
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleSaveUnrecognized = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!unrecognizedMsg || !newMsgName.trim()) return;
+    
+    saveMessageToActiveDbc(unrecognizedMsg.id, newMsgName.trim(), unrecognizedMsg.dlc, newMsgSender.trim());
+    setUnrecognizedMsg(null);
+    setNewMsgName('');
+    setNewMsgSender('Vector_XXX');
   };
 
   // Helper to parse standard Linux socketcan candump file
@@ -122,13 +157,13 @@ export const LiveViewer: React.FC = () => {
   return (
     <div className="glass-panel p-4 flex flex-col h-full overflow-hidden">
       {/* Header controls */}
-      <div className="flex items-center justify-between mb-4 pb-2 border-b border-[var(--border-color)]">
-        <div className="flex items-center gap-2">
-          <Filter className={`w-4 h-4 ${protocol === 'j1939' ? 'text-cyber-j1939' : 'text-cyber-canopen'}`} />
-          <span className="font-semibold text-[var(--text-color)] text-sm">Live CAN Bus Traffic</span>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-2 border-b border-[var(--border-color)]">
+        <div className="flex items-center gap-2 min-w-0">
+          <Filter className={`w-4 h-4 shrink-0 ${protocol === 'j1939' ? 'text-cyber-j1939' : 'text-cyber-canopen'}`} />
+          <span className="font-semibold text-[var(--text-color)] text-sm truncate">Live CAN Bus Traffic</span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
           {/* Pause Toggle */}
           <button
             onClick={() => setPausedLogs(!pausedLogs)}
@@ -144,7 +179,7 @@ export const LiveViewer: React.FC = () => {
             onClick={handleExportCsv}
             disabled={logs.length === 0}
             className="glass-button text-xs"
-            title="Export Logs as CSV"
+            title="Export Logs in CANKing CSV format"
           >
             <Download className="w-3.5 h-3.5" />
             Export CSV
@@ -179,16 +214,40 @@ export const LiveViewer: React.FC = () => {
         </div>
       </div>
 
-      {/* Filter search bar */}
-      <div className="mb-3 relative">
-        <input
-          type="text"
-          placeholder="Filter logs by Hex ID, message name, payload bytes..."
-          value={filterText}
-          onChange={(e) => setFilterText(e.target.value)}
-          className="glass-input w-full pl-8 py-1.5 text-xs rounded"
-        />
-        <Filter className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2" />
+      {/* Filter search and display toggles bar */}
+      <div className="mb-3 flex flex-col md:flex-row items-stretch md:items-center gap-3">
+        <div className="relative flex-1">
+          <input
+            type="text"
+            placeholder="Filter logs by Hex ID, message name, payload bytes..."
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+            className="glass-input w-full pl-8 py-1.5 text-xs rounded"
+          />
+          <Filter className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2" />
+        </div>
+
+        <div className="flex items-center gap-3 text-xs bg-[var(--bg-card-sub)] border border-[var(--border-color)] px-3 py-1.5 rounded flex-shrink-0">
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showNicknames}
+              onChange={(e) => setShowNicknames(e.target.checked)}
+              className="rounded bg-black/10 border-[var(--border-color)] text-cyber-accent"
+            />
+            <span className="font-semibold text-[var(--text-color)]">Device Nicknames</span>
+          </label>
+          <div className="w-px h-3.5 bg-[var(--border-color)]" />
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showInterpreted}
+              onChange={(e) => setShowInterpreted(e.target.checked)}
+              className="rounded bg-black/10 border-[var(--border-color)] text-cyber-accent"
+            />
+            <span className="font-semibold text-[var(--text-color)]">Interpreted Names</span>
+          </label>
+        </div>
       </div>
 
       {/* Logs Table Grid */}
@@ -198,8 +257,17 @@ export const LiveViewer: React.FC = () => {
             <tr>
               <th className="py-2.5 px-3">Time (ms)</th>
               <th className="py-2.5 px-3">Delta (ms)</th>
-              <th className="py-2.5 px-3">Dir</th>
-              <th className="py-2.5 px-3">CAN ID</th>
+              <th className="py-2.5 px-3" title="Direction (Rx: Received, Tx: Transmitted)">Dir (Rx/Tx)</th>
+              {protocol === 'j1939' ? (
+                <>
+                  <th className="py-2.5 px-3">CAN ID</th>
+                  <th className="py-2.5 px-3">PGN</th>
+                  <th className="py-2.5 px-3">Src Address (SA)</th>
+                  <th className="py-2.5 px-3">Dest Address (DA)</th>
+                </>
+              ) : (
+                <th className="py-2.5 px-3">CAN ID</th>
+              )}
               <th className="py-2.5 px-3">DLC</th>
               <th className="py-2.5 px-3">Payload (Hex)</th>
               <th className="py-2.5 px-3">Message Description</th>
@@ -208,7 +276,7 @@ export const LiveViewer: React.FC = () => {
           <tbody className="divide-y divide-[var(--border-sub)]">
             {filteredLogs.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-[var(--text-muted)] italic">
+                <td colSpan={protocol === 'j1939' ? 10 : 7} className="py-8 text-center text-[var(--text-muted)] italic">
                   {pausedLogs ? 'Log Viewer Paused.' : 'No CAN traffic detected. Connect the bus or start simulation.'}
                 </td>
               </tr>
@@ -217,7 +285,53 @@ export const LiveViewer: React.FC = () => {
               [...filteredLogs].reverse().map((log, index) => {
                 const logIdx = filteredLogs.length - 1 - index;
                 const isExpanded = expandedLogIdx === logIdx;
-                const idHex = `0x${log.id.toString(16).toUpperCase()}`;
+                
+                // Enforce full 8-hex nibble formatting for J1939 CAN IDs
+                const idHex = protocol === 'j1939'
+                  ? `0x${log.id.toString(16).padStart(8, '0').toUpperCase()}`
+                  : `0x${log.id.toString(16).toUpperCase()}`;
+
+                const j1939Details = protocol === 'j1939' ? parseJ1939Id(log.id) : null;
+
+                // Check if message is unrecognized
+                const activeDbc = dbcs[activeDbcName];
+                let isUnrecognized = false;
+                if (activeDbc) {
+                  if (protocol === 'j1939' && j1939Details) {
+                    const matchedMessage = Object.values(activeDbc.messages).find(msg => {
+                      const dbMsgDetails = parseJ1939Id(msg.id);
+                      return dbMsgDetails.pgn === j1939Details.pgn;
+                    });
+                    isUnrecognized = !matchedMessage;
+                  } else {
+                    isUnrecognized = !activeDbc.messages[log.id];
+                  }
+                }
+
+                // Friendly description logic
+                let displayDescription = log.name || 'Unknown Frame';
+                if (showNicknames) {
+                  // Replace "Node X" with the friendly name if matched
+                  const nodeMatch = displayDescription.match(/Node\s+(\d+)/i);
+                  if (nodeMatch) {
+                    const nid = parseInt(nodeMatch[1], 10);
+                    const dev = devices.find(d => d.nodeId === nid);
+                    if (dev) {
+                      displayDescription = displayDescription.replace(/Node\s+\d+/i, dev.name);
+                    }
+                  }
+                }
+
+                if (!showInterpreted) {
+                  if (protocol === 'j1939' && j1939Details) {
+                    displayDescription = `PGN 0x${j1939Details.pgn.toString(16).toUpperCase()} (${j1939Details.pgn})`;
+                  } else {
+                    const type = log.id & 0x780;
+                    const nid = log.id & 0x07F;
+                    const nodeStr = showNicknames ? getNickname(nid) : `Node ${nid}`;
+                    displayDescription = `FC: 0x${type.toString(16).toUpperCase()} ${nodeStr}`;
+                  }
+                }
 
                 return (
                   <React.Fragment key={logIdx}>
@@ -230,11 +344,11 @@ export const LiveViewer: React.FC = () => {
                       {/* Time */}
                       <td className="py-2 px-3 text-[var(--text-muted)]">{log.timestamp}</td>
                       
-                      {/* Delta */}
+                      {/* Delta (Format to 1 decimal place) */}
                       <td className={`py-2 px-3 font-semibold ${
                         log.delta > 200 ? 'text-amber-500' : 'text-[var(--text-muted)]'
                       }`}>
-                        +{log.delta}
+                        +{typeof log.delta === 'number' ? log.delta.toFixed(1) : log.delta}
                       </td>
 
                       {/* Direction */}
@@ -248,12 +362,31 @@ export const LiveViewer: React.FC = () => {
                         </span>
                       </td>
 
-                      {/* CAN ID */}
-                      <td className={`py-2 px-3 font-semibold ${
-                        protocol === 'j1939' ? 'text-cyber-j1939' : 'text-cyber-canopen'
-                      }`}>
-                        {idHex}
-                      </td>
+                      {protocol === 'j1939' && j1939Details ? (
+                        <>
+                          {/* CAN ID (Padded) */}
+                          <td className="py-2 px-3 text-cyber-j1939 font-semibold">{idHex}</td>
+                          {/* PGN */}
+                          <td className="py-2 px-3 text-[var(--text-color)] font-mono">
+                            0x{j1939Details.pgn.toString(16).toUpperCase()}
+                          </td>
+                          {/* SA */}
+                          <td className="py-2 px-3 text-[var(--text-color)] truncate max-w-[110px]" title={showNicknames ? getNickname(j1939Details.sa) : `SA: ${j1939Details.sa}`}>
+                            {showNicknames ? getNickname(j1939Details.sa) : j1939Details.sa}
+                          </td>
+                          {/* DA */}
+                          <td className="py-2 px-3 text-[var(--text-muted)] truncate max-w-[110px]" title={j1939Details.da !== null ? (showNicknames ? getNickname(j1939Details.da) : `DA: ${j1939Details.da}`) : 'Global Broadcast'}>
+                            {j1939Details.da !== null ? (showNicknames ? getNickname(j1939Details.da) : j1939Details.da) : 'Global (255)'}
+                          </td>
+                        </>
+                      ) : (
+                        /* CAN ID */
+                        <td className={`py-2 px-3 font-semibold ${
+                          protocol === 'j1939' ? 'text-cyber-j1939' : 'text-cyber-canopen'
+                        }`}>
+                          {idHex}
+                        </td>
+                      )}
 
                       {/* DLC */}
                       <td className="py-2 px-3 text-[var(--text-muted)]">{log.dlc}</td>
@@ -263,15 +396,30 @@ export const LiveViewer: React.FC = () => {
                         {formatPayloadHex(log.data)}
                       </td>
 
-                      {/* Name / Desc */}
-                      <td className="py-2 px-3 text-[var(--text-color)] font-medium flex items-center justify-between gap-2">
-                        <span className="truncate max-w-[180px]">{log.name || 'Unknown Frame'}</span>
-                        <div className="flex items-center gap-1">
-                          {isExpanded ? (
-                            <ChevronDown className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                          ) : (
-                            <ChevronRight className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                          )}
+                      {/* Name / Desc + Quick Action inline DBC saver */}
+                      <td className="py-2 px-3 text-[var(--text-color)] font-medium">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate max-w-[180px]">{displayDescription}</span>
+                          <div className="flex items-center gap-1">
+                            {isUnrecognized && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setUnrecognizedMsg({ id: log.id, dlc: log.dlc });
+                                  setNewMsgName(protocol === 'j1939' && j1939Details ? `PGN_${j1939Details.pgn}` : `COB_0x${log.id.toString(16).toUpperCase()}`);
+                                }}
+                                className="p-0.5 rounded hover:bg-[var(--bg-input)] text-cyber-canopen hover:text-amber-400 transition-colors"
+                                title="Add Message Template to Active DBC"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {isExpanded ? (
+                              <ChevronDown className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                            ) : (
+                              <ChevronRight className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                            )}
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -279,7 +427,7 @@ export const LiveViewer: React.FC = () => {
                     {/* Decoded Signals Sub-Panel */}
                     {isExpanded && (
                       <tr className="bg-[var(--bg-card-sub)]/80">
-                        <td colSpan={7} className="py-3 px-6">
+                        <td colSpan={protocol === 'j1939' ? 10 : 7} className="py-3 px-6">
                           <div className="border-l-2 border-[var(--border-color)] pl-4 space-y-2">
                             <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
                               Decoded Database Signals
@@ -320,11 +468,7 @@ export const LiveViewer: React.FC = () => {
                                           e.stopPropagation();
                                           togglePlotSignal(sigName);
                                         }}
-                                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-semibold transition-all border ${
-                                          isPlotted
-                                            ? 'bg-cyber-accent/10 border-cyber-accent/30 text-cyber-accent glow-accent font-bold'
-                                            : 'bg-[var(--bg-card-sub)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-color)]'
-                                        }`}
+                                        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-semibold transition-all border bg-[var(--bg-card-sub)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-color)]"
                                       >
                                         <Eye className="w-2.5 h-2.5" />
                                         {isPlotted ? 'Plotted' : 'Plot'}
@@ -345,6 +489,59 @@ export const LiveViewer: React.FC = () => {
           </tbody>
         </table>
       </div>
+
+      {/* Add Unrecognized Message to DBC Modal */}
+      {unrecognizedMsg && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="glass-panel p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-bold text-[var(--text-color)] mb-4">Add Unrecognized Message to DBC</h3>
+            <div className="bg-[var(--bg-card-sub)] border border-[var(--border-color)] rounded p-2.5 mb-3 text-xs space-y-1">
+              <div>CAN ID: <strong className="font-mono">0x{unrecognizedMsg.id.toString(16).toUpperCase()}</strong></div>
+              <div>DLC: <strong>{unrecognizedMsg.dlc} bytes</strong></div>
+            </div>
+            <form onSubmit={handleSaveUnrecognized} className="space-y-3.5">
+              <div>
+                <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">Message Name</label>
+                <input
+                  type="text"
+                  value={newMsgName}
+                  onChange={e => setNewMsgName(e.target.value)}
+                  className="glass-input w-full text-xs"
+                  placeholder="e.g. EngineTempStatus"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">Sender Node</label>
+                <input
+                  type="text"
+                  value={newMsgSender}
+                  onChange={e => setNewMsgSender(e.target.value)}
+                  className="glass-input w-full text-xs"
+                  placeholder="e.g. Vector_XXX"
+                  required
+                />
+              </div>
+              
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setUnrecognizedMsg(null)}
+                  className="flex-1 glass-button text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-cyber-accent border border-cyber-accent/40 text-black hover:bg-emerald-400 text-xs font-bold rounded py-1.5 active:scale-95 transition-all"
+                >
+                  Save to DBC
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

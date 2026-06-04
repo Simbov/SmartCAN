@@ -18,7 +18,8 @@ export const Header: React.FC = () => {
     togglePanelVisibility,
     panelPositions,
     setPanelPosition,
-    kvaserStatus
+    kvaserStatus,
+    kvaserDeviceName
   } = useStore();
 
   const [showLayoutMenu, setShowLayoutMenu] = useState(false);
@@ -107,7 +108,7 @@ export const Header: React.FC = () => {
         <div className="flex items-center gap-2.5 text-xs font-semibold bg-black/10 border border-[var(--border-color)] px-3 py-1.5 rounded">
           <span className="text-gray-500 font-medium">Interface:</span>
           <span className={protocol === 'j1939' ? 'text-cyber-j1939' : 'text-cyber-canopen'}>
-            Kvaser Leaf Light
+            {kvaserDeviceName || 'Kvaser Leaf Light'}
           </span>
           <div className="flex items-center gap-1.5 ml-1 pl-2 border-l border-gray-300 dark:border-white/10">
             {kvaserStatus === 'physical' && (

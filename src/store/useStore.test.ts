@@ -139,4 +139,21 @@ describe('Zustand store (CanStore)', () => {
     expect(state.isConnected).toBe(false);
     expect(state.kvaserStatus).toBe('offline');
   });
+
+  it('should transition to simulated mode via startSimulationMode', () => {
+    useStore.getState().startSimulationMode();
+    const state = useStore.getState();
+    expect(state.isConnected).toBe(true);
+    expect(state.kvaserStatus).toBe('simulated');
+    expect(state.kvaserDeviceName).toBe('Simulated CAN Bus');
+    expect(state.connectionError).toBe(null);
+  });
+
+  it('should allow dismissing connection errors', () => {
+    useStore.setState({ connectionError: 'Some DLL is missing error' });
+    expect(useStore.getState().connectionError).toBe('Some DLL is missing error');
+    
+    useStore.getState().dismissConnectionError();
+    expect(useStore.getState().connectionError).toBe(null);
+  });
 });

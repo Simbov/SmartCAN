@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { Send, Clock } from 'lucide-react';
 import { encodeFrame } from '../lib/dbcParser';
+import { buildJ1939Id, parseJ1939Id } from '../lib/j1939';
 
 export const CanTransmitter: React.FC = () => {
   const { dbcs, activeDbcName, transmitFrame, isConnected, protocol } = useStore();
@@ -9,12 +10,44 @@ export const CanTransmitter: React.FC = () => {
   const [mode, setMode] = useState<'raw' | 'dbc'>('raw');
   
   // Raw mode state
-  const [rawIdHex, setRawIdHex] = useState('181');
+  const [rawIdHex, setRawIdHex] = useState('18F00401');
   const [rawDlc, setRawDlc] = useState(8);
   const [rawPayloadHex, setRawPayloadHex] = useState('00 00 00 00 00 00 00 00');
   const [isRawPeriodic, setIsRawPeriodic] = useState(false);
   const [rawInterval, setRawInterval] = useState(100);
   const [rawTimerId, setRawTimerId] = useState<ReturnType<typeof setInterval> | null>(null);
+
+  // J1939 specific builder states
+  const [j1939Priority, setJ1939Priority] = useState(6);
+  const [j1939PgnHex, setJ1939PgnHex] = useState('F004');
+  const [j1939Sa, setJ1939Sa] = useState(1);
+  const [j1939Da, setJ1939Da] = useState(255);
+
+  const syncJ1939ToRaw = (pri: number, pgnStr: string, sa: number, da: number) => {
+    const cleanPgn = pgnStr.replace(/[^0-9A-Fa-f]/g, '');
+    const pgn = (pgnStr.toLowerCase().startsWith('0x') || isNaN(Number(pgnStr)))
+      ? (parseInt(cleanPgn, 16) || 0)
+      : (parseInt(cleanPgn, 10) || 0);
+
+    const compiled = buildJ1939Id(pri, pgn, sa, da);
+    setRawIdHex(compiled.toString(16).toUpperCase());
+  };
+
+  const handleRawIdChange = (val: string) => {
+    setRawIdHex(val);
+    const parsed = parseInt(val, 16);
+    if (!isNaN(parsed) && protocol === 'j1939') {
+      try {
+        const details = parseJ1939Id(parsed);
+        setJ1939Priority(details.priority);
+        setJ1939PgnHex(details.pgn.toString(16).toUpperCase());
+        setJ1939Sa(details.sa);
+        setJ1939Da(details.da ?? 255);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  };
 
   // DBC mode state
   const [selectedMsgId, setSelectedMsgId] = useState<number>(0);
@@ -204,9 +237,9 @@ export const CanTransmitter: React.FC = () => {
                 <input
                   type="text"
                   value={rawIdHex}
-                  onChange={e => setRawIdHex(e.target.value)}
+                  onChange={e => handleRawIdChange(e.target.value)}
                   className="glass-input w-full text-xs font-mono"
-                  placeholder="e.g. 18F00401"
+                  placeholder={protocol === 'j1939' ? 'e.g. 18F00401' : 'e.g. 181'}
                 />
               </div>
               <div>
@@ -221,6 +254,79 @@ export const CanTransmitter: React.FC = () => {
                 />
               </div>
             </div>
+
+            {protocol === 'j1939' && (
+              <div className="bg-[var(--bg-card-sub)] border border-[var(--border-color)] rounded p-2.5 space-y-2">
+                <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-wider block">J1939 Identifier Builder</span>
+                <div className="grid grid-cols-4 gap-2">
+                  <div>
+                    <label className="block text-[8px] font-semibold text-[var(--text-muted)] mb-0.5">Priority</label>
+                    <select
+                      value={j1939Priority}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setJ1939Priority(val);
+                        syncJ1939ToRaw(val, j1939PgnHex, j1939Sa, j1939Da);
+                      }}
+                      className="glass-input text-[10px] px-1 py-0.5 w-full font-semibold"
+                    >
+                      {Array.from({ length: 8 }, (_, i) => (
+                        <option key={i} value={i}>
+                          {i}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[8px] font-semibold text-[var(--text-muted)] mb-0.5">PGN</label>
+                    <input
+                      type="text"
+                      value={j1939PgnHex}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setJ1939PgnHex(val);
+                        syncJ1939ToRaw(j1939Priority, val, j1939Sa, j1939Da);
+                      }}
+                      placeholder="e.g. F004"
+                      className="glass-input text-[10px] px-1 py-0.5 w-full font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[8px] font-semibold text-[var(--text-muted)] mb-0.5">SA (Src)</label>
+                    <input
+                      type="number"
+                      value={j1939Sa}
+                      onChange={(e) => {
+                        const val = Math.max(0, Math.min(253, Number(e.target.value)));
+                        setJ1939Sa(val);
+                        syncJ1939ToRaw(j1939Priority, j1939PgnHex, val, j1939Da);
+                      }}
+                      min={0}
+                      max={253}
+                      className="glass-input text-[10px] px-1 py-0.5 w-full font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[8px] font-semibold text-[var(--text-muted)] mb-0.5">DA (Dest)</label>
+                    <input
+                      type="number"
+                      value={j1939Da}
+                      onChange={(e) => {
+                        const val = Math.max(0, Math.min(255, Number(e.target.value)));
+                        setJ1939Da(val);
+                        syncJ1939ToRaw(j1939Priority, j1939PgnHex, j1939Sa, val);
+                      }}
+                      min={0}
+                      max={255}
+                      className="glass-input text-[10px] px-1 py-0.5 w-full font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">Hex Payload Data</label>

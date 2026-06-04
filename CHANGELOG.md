@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Dynamic Device Name Display**: Queries and shows the name of the connected Kvaser channel (e.g., `Kvaser Leaf Light v2 (Ch 0)`) in the Interface header info.
+- **Connection Error Dialog**: Detects failed connections, driver/DLL loading errors, and guides the user to retry or enter Simulation Mode.
+- **J1939 Structured Builder**: Added input fields for Priority, PGN, SA, and DA in the transmitter that sync automatically with the raw ID.
+- **DBC Full-Width Workspace**: Moved the DBC Inspector to its own dedicated tab with a split layout.
+- **CSV Matrix Exporter**: Added "Export CAN Specification" CSV exporter to save DBC messages and signals as a specification grid.
+- **SDO Index Scan**: Sequentially scans common SDO indices for active CANopen nodes.
+- **Generic CANopen Messaging**: Enables sending arbitrary CANopen messages with custom COB-IDs.
+
+### Fixed
+- **Tauri v2 Environment Detection**: Upgraded window property checks to correctly identify Tauri desktop execution shell under v2 contexts, fixing simulated fallback behavior.
+- **Kvaser Leaf V3 Channels**: Robust scan across physical and virtual channels to open the first available channel.
+- **SDO Phantom Responses**: Resolved active request duplicates using timeouts and length tracking.
+- **Log Import Delimiter**: Dynamic delimiter parsing supporting both comma and semicolon files.
+- **Traffic Layout & Formatting**: Repaired live traffic filters overlapping and reduced decimal places for delta time.
+
 ## [0.0.0] - 2026-06-03
 
 ### Added

@@ -80,6 +80,8 @@ interface CanStore {
   baudRate: number;
   isConnected: boolean;
   kvaserStatus: 'offline' | 'physical' | 'simulated';
+  kvaserDeviceName: string | null;
+  connectionError: string | null;
   
   // Layout Options
   theme: 'light' | 'dark';
@@ -113,6 +115,8 @@ interface CanStore {
   setProtocol: (proto: 'canopen' | 'j1939') => void;
   setBaudRate: (baud: number) => void;
   setConnected: (connected: boolean) => Promise<void>;
+  startSimulationMode: () => void;
+  dismissConnectionError: () => void;
   toggleTheme: () => void;
   togglePanelVisibility: (panelName: string) => void;
   setPanelPosition: (panelName: string, position: 'sidebar' | 'main-top' | 'main-bottom') => void;
@@ -136,6 +140,7 @@ interface CanStore {
   clearLogs: () => void;
   setPausedLogs: (paused: boolean) => void;
   importLogsCsv: (csvContent: string) => void;
+  saveMessageToActiveDbc: (id: number, name: string, dlc: number, sender: string) => void;
   
   // Plot actions
   togglePlotSignal: (sigName: string) => void;
@@ -169,6 +174,8 @@ export const useStore = create<CanStore>((set, get) => {
     baudRate: 250000,
     isConnected: false,
     kvaserStatus: 'offline',
+    kvaserDeviceName: null,
+    connectionError: null,
     theme: 'dark',
     visiblePanels: {
       deviceManager: true,
@@ -305,10 +312,21 @@ export const useStore = create<CanStore>((set, get) => {
             const { invoke } = await import('@tauri-apps/api/core');
             const { listen } = await import('@tauri-apps/api/event');
             
+            set({ connectionError: null });
+            
             // Start Kvaser Leaf listener in the backend
-            const msg = await invoke('start_kvaser', { baudRate: state.baudRate }) as string;
-            const isPhysical = msg.includes("physical");
-            set({ kvaserStatus: isPhysical ? 'physical' : 'simulated' });
+            const result = await invoke('start_kvaser', { baudRate: state.baudRate }) as {
+              device_name: string;
+              channel: number;
+              is_virtual: boolean;
+            };
+            
+            set({ 
+              kvaserStatus: 'physical',
+              kvaserDeviceName: `${result.device_name} (Ch ${result.channel})`,
+              connectionError: null,
+              isConnected: true
+            });
             
             // Listen for frames emitted from Rust
             const unlisten = await listen('kvaser-frame', (event: { payload: unknown }) => {
@@ -327,13 +345,26 @@ export const useStore = create<CanStore>((set, get) => {
             kvaserUnlisten = unlisten;
           } catch (err) {
             console.error('Tauri Kvaser connection failed:', err);
-            set({ kvaserStatus: 'offline' });
+            set({ 
+              kvaserStatus: 'offline',
+              kvaserDeviceName: null,
+              connectionError: String(err),
+              isConnected: false
+            });
           }
         } else {
           // Web Browser Fallback: open virtual channel silently
-          set({ kvaserStatus: 'simulated' });
+          set({ 
+            kvaserStatus: 'simulated',
+            kvaserDeviceName: 'Web Simulator (Virtual)',
+            connectionError: null,
+            isConnected: true
+          });
         }
       } else {
+        if (state.kvaserStatus === 'simulated') {
+          state.stopSimulation();
+        }
         if (isTauriEnv()) {
           try {
             const { invoke } = await import('@tauri-apps/api/core');
@@ -348,9 +379,26 @@ export const useStore = create<CanStore>((set, get) => {
         } else {
           state.stopSimulation();
         }
-        set({ kvaserStatus: 'offline' });
+        set({ 
+          kvaserStatus: 'offline', 
+          kvaserDeviceName: null, 
+          connectionError: null,
+          isConnected: false
+        });
       }
-      set({ isConnected });
+    },
+
+    startSimulationMode: () => {
+      set({
+        kvaserStatus: 'simulated',
+        kvaserDeviceName: 'Simulated CAN Bus',
+        connectionError: null,
+        isConnected: true
+      });
+    },
+
+    dismissConnectionError: () => {
+      set({ connectionError: null });
     },
 
     loadDbcFile: (name, content) => {
@@ -565,29 +613,92 @@ export const useStore = create<CanStore>((set, get) => {
       state.clearLogs();
       
       const lines = csvContent.split(/\r?\n/);
-      let isFirst = true;
+      if (lines.length < 2) return;
 
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        if (isFirst) {
-          isFirst = false; // skip header
-          continue;
+      // Detect delimiter based on the first line (header)
+      const delimiter = lines[0].includes(';') ? ';' : ',';
+      const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase());
+
+      // Locate column indices dynamically
+      const timeIdx = headers.findIndex(h => h.includes('time'));
+      const dirIdx = headers.findIndex(h => h.includes('dir') || h.includes('flag'));
+      const idIdx = headers.findIndex(h => h.includes('id') || h.includes('ident'));
+      const dlcIdx = headers.findIndex(h => h.includes('dlc'));
+
+      // Look for data columns: can be Data(0)... or a single Data column
+      const data0Idx = headers.findIndex(h => h.startsWith('data(0)') || h === 'data(0)' || h === 'data0' || h.startsWith('data0'));
+      const dataHexIdx = headers.findIndex(h => h.includes('data(hex)') || h === 'data');
+
+      const actualTimeIdx = timeIdx !== -1 ? timeIdx : 0;
+      const actualDirIdx = dirIdx !== -1 ? dirIdx : 1;
+      const actualIdIdx = idIdx !== -1 ? idIdx : 2;
+      const actualDlcIdx = dlcIdx !== -1 ? dlcIdx : 3;
+
+      let isSeconds = false;
+      const timeHeader = timeIdx !== -1 ? headers[timeIdx] : '';
+      if (timeHeader === 'time' || timeHeader.includes('(s)') || timeHeader.includes('sec')) {
+        isSeconds = true;
+      }
+
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const cols = line.split(delimiter);
+        if (cols.length <= Math.max(actualTimeIdx, actualDirIdx, actualIdIdx, actualDlcIdx)) continue;
+
+        let timestamp = parseFloat(cols[actualTimeIdx]) || 0;
+        if (isSeconds) {
+          timestamp = Math.round(timestamp * 1000);
         }
 
-        const cols = line.split(',');
-        if (cols.length < 5) continue;
+        const rawDir = cols[actualDirIdx].trim().toUpperCase();
+        let direction: 'RX' | 'TX' = 'RX';
+        if (rawDir.includes('TX') || rawDir === 'T' || rawDir === '1' || rawDir === '0X01') {
+          direction = 'TX';
+        }
 
-        // Header format expected: Time(ms),Dir,ID(Hex),DLC,Data(Hex)
-        const timestamp = parseFloat(cols[0]);
-        const direction = cols[1].trim().toUpperCase() as 'RX' | 'TX';
-        const id = parseInt(cols[2].trim(), 16);
-        const dlc = parseInt(cols[3].trim(), 10);
-        
-        // Parse data hex
-        const dataHex = cols[4].trim();
-        const dataBytes = new Uint8Array(
-          dataHex.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []
-        );
+        const rawId = cols[actualIdIdx].trim();
+        const id = rawId.toLowerCase().startsWith('0x')
+          ? (parseInt(rawId.slice(2), 16) || 0)
+          : (headers[actualIdIdx] && (headers[actualIdIdx].includes('ident') || headers[actualIdIdx] === 'id(hex)'))
+          ? (parseInt(rawId, 16) || 0)
+          : (/[a-fA-F]/.test(rawId))
+          ? (parseInt(rawId, 16) || 0)
+          : (parseInt(rawId, 10) || parseInt(rawId, 16) || 0);
+
+        const dlc = parseInt(cols[actualDlcIdx].trim(), 10) || 0;
+
+        let dataBytes: Uint8Array;
+        if (data0Idx !== -1) {
+          const bytes: number[] = [];
+          for (let j = 0; j < dlc; j++) {
+            const colVal = cols[data0Idx + j];
+            if (colVal !== undefined && colVal.trim() !== '') {
+              const trimmed = colVal.trim().replace(/^0x/i, '');
+              const val = parseInt(trimmed, 16);
+              bytes.push(isNaN(val) ? 0 : val);
+            }
+          }
+          dataBytes = new Uint8Array(bytes);
+        } else if (dataHexIdx !== -1) {
+          const dataHex = cols[dataHexIdx].trim().replace(/\s+/g, '');
+          dataBytes = new Uint8Array(
+            dataHex.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []
+          );
+        } else {
+          // Fallback: collect all trailing columns after DLC
+          const bytes: number[] = [];
+          for (let j = actualDlcIdx + 1; j < cols.length; j++) {
+            const colVal = cols[j];
+            if (colVal !== undefined && colVal.trim() !== '') {
+              const trimmed = colVal.trim().replace(/^0x/i, '');
+              const val = parseInt(trimmed, 16);
+              bytes.push(isNaN(val) ? 0 : val);
+            }
+          }
+          dataBytes = new Uint8Array(bytes).slice(0, dlc);
+        }
 
         state.addLog({
           timestamp,
@@ -597,6 +708,33 @@ export const useStore = create<CanStore>((set, get) => {
           data: dataBytes
         });
       }
+    },
+
+    saveMessageToActiveDbc: (id, name, dlc, sender) => {
+      const state = get();
+      const activeDbc = state.dbcs[state.activeDbcName];
+      if (!activeDbc) return;
+
+      const updatedMessages = {
+        ...activeDbc.messages,
+        [id]: {
+          id,
+          name,
+          dlc,
+          sender,
+          signals: []
+        }
+      };
+
+      set({
+        dbcs: {
+          ...state.dbcs,
+          [state.activeDbcName]: {
+            ...activeDbc,
+            messages: updatedMessages
+          }
+        }
+      });
     },
 
     togglePlotSignal: (sigName) => set(state => {
