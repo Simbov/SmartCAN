@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-06-05
+
 ### Fixed
 - **Windows Startup Crash**: Added `"label": "main"` to the tauri window configuration to ensure compatibility with Tauri v2 capabilities.
 - **Robustness and Diagnostics**:
