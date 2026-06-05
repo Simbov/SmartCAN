@@ -24,6 +24,7 @@ struct Canlib {
     _lib: Library,
     _can_initialize_library: unsafe extern "C" fn(),
     can_get_number_of_channels: unsafe extern "C" fn(*mut i32) -> i32,
+    can_enum_hardware_ex: Option<unsafe extern "C" fn(*mut i32) -> i32>,
     can_open_channel: unsafe extern "C" fn(i32, i32) -> i32,
     can_close: unsafe extern "C" fn(i32) -> i32,
     can_set_bus_params: unsafe extern "C" fn(i32, i32, i32, i32, i32, i32, i32) -> i32,
@@ -97,6 +98,11 @@ impl Canlib {
             let can_get_channel_data = lib.get::<unsafe extern "C" fn(i32, i32, *mut std::ffi::c_void, usize) -> i32>(b"canGetChannelData")
                 .map_err(|e| format!("Failed to find symbol 'canGetChannelData': {:?}", e))?;
 
+            let can_enum_hardware_ex = match lib.get::<unsafe extern "C" fn(*mut i32) -> i32>(b"canEnumHardwareEx") {
+                Ok(sym) => Some(*sym),
+                Err(_) => None,
+            };
+
             let can_initialize_library = *can_initialize_library;
             let can_get_number_of_channels = *can_get_number_of_channels;
             let can_open_channel = *can_open_channel;
@@ -115,6 +121,7 @@ impl Canlib {
                 _lib: lib,
                 _can_initialize_library: can_initialize_library,
                 can_get_number_of_channels,
+                can_enum_hardware_ex,
                 can_open_channel,
                 can_close,
                 can_set_bus_params,
@@ -161,9 +168,15 @@ pub fn start_kvaser(app: AppHandle, baud_rate: u32, state: State<'_, KvaserState
     let canlib = get_canlib()?;
 
     let mut num_channels = 0;
-    let status = unsafe { (canlib.can_get_number_of_channels)(&mut num_channels) };
+    let status = unsafe {
+        if let Some(enum_hw) = canlib.can_enum_hardware_ex {
+            enum_hw(&mut num_channels)
+        } else {
+            (canlib.can_get_number_of_channels)(&mut num_channels)
+        }
+    };
     if status < 0 {
-        return Err(format!("Failed to retrieve channel count (code {})", status));
+        return Err(format!("Failed to retrieve/enumerate channel count (code {})", status));
     }
     if num_channels <= 0 {
         return Err("No Kvaser hardware channels detected. Make sure your Kvaser Leaf device is plugged in.".to_string());
@@ -177,21 +190,49 @@ pub fn start_kvaser(app: AppHandle, baud_rate: u32, state: State<'_, KvaserState
     unsafe {
         // 1. Try to find a physical channel first (flag = 0)
         for ch in 0..num_channels {
-            // Check if the channel has the virtual capability flag (canCHANNEL_CAP_VIRTUAL = 0x00010000)
-            let mut caps = 0u32;
-            let cap_status = (canlib.can_get_channel_data)(
-                ch,
-                1, // canCHANNELDATA_CHANNEL_CAP
-                &mut caps as *mut _ as *mut std::ffi::c_void,
-                std::mem::size_of::<u32>(),
-            );
-            if cap_status >= 0 && (caps & 0x00010000) != 0 {
-                // Skip virtual channels in the physical scan phase
-                continue;
-            }
-
             let handle = (canlib.can_open_channel)(ch, 0);
             if handle >= 0 {
+                // Query properties of the opened channel to ensure it's not virtual
+                let mut caps = 0u32;
+                let cap_status = (canlib.can_get_channel_data)(
+                    ch,
+                    1, // canCHANNELDATA_CHANNEL_CAP
+                    &mut caps as *mut _ as *mut std::ffi::c_void,
+                    std::mem::size_of::<u32>(),
+                );
+                
+                let mut card_type = 0u32;
+                let type_status = (canlib.can_get_channel_data)(
+                    ch,
+                    4, // canCHANNELDATA_CARD_TYPE
+                    &mut card_type as *mut _ as *mut std::ffi::c_void,
+                    std::mem::size_of::<u32>(),
+                );
+
+                let mut buf = vec![0u8; 256];
+                let name_status = (canlib.can_get_channel_data)(
+                    ch,
+                    26, // canCHANNELDATA_DEVDESCR_ASCII
+                    buf.as_mut_ptr() as *mut std::ffi::c_void,
+                    buf.len(),
+                );
+                let name = if name_status >= 0 {
+                    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+                    String::from_utf8_lossy(&buf[..len]).to_string()
+                } else {
+                    format!("Kvaser Channel {}", ch)
+                };
+
+                let is_virtual_cap = cap_status >= 0 && (caps & 0x00010000) != 0; // canCHANNEL_CAP_VIRTUAL = 0x00010000
+                let is_virtual_type = type_status >= 0 && card_type == 1; // canHWTYPE_VIRTUAL = 1
+                let is_virtual_name = name.to_lowercase().contains("virtual");
+
+                if is_virtual_cap || is_virtual_type || is_virtual_name {
+                    // Skip virtual channels in the physical scan phase
+                    (canlib.can_close)(handle);
+                    continue;
+                }
+
                 let freq_preset = match baud_rate {
                     125000 => -9,
                     250000 => -3,
@@ -204,20 +245,6 @@ pub fn start_kvaser(app: AppHandle, baud_rate: u32, state: State<'_, KvaserState
                 if param_status >= 0 {
                     let bus_status = (canlib.can_bus_on)(handle);
                     if bus_status >= 0 {
-                        let mut buf = vec![0u8; 256];
-                        let data_status = (canlib.can_get_channel_data)(
-                            ch,
-                            26, // canCHANNELDATA_DEVDESCR_ASCII
-                            buf.as_mut_ptr() as *mut std::ffi::c_void,
-                            buf.len(),
-                        );
-                        let name = if data_status >= 0 {
-                            let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-                            String::from_utf8_lossy(&buf[..len]).to_string()
-                        } else {
-                            format!("Kvaser Channel {}", ch)
-                        };
-
                         channel_opened = Some(handle);
                         opened_channel_idx = ch;
                         opened_device_name = name;
