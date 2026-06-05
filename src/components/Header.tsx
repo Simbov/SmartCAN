@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useStore } from '../store/useStore';
 import { Play, Square, Activity, Trash2, Cpu, Sun, Moon, LayoutGrid, RefreshCw } from 'lucide-react';
 import { isTauriEnv } from '../lib/tauriAdapter';
@@ -15,29 +15,17 @@ export const Header: React.FC = () => {
     logs,
     theme,
     toggleTheme,
-    visiblePanels,
-    togglePanelVisibility,
-    panelPositions,
-    setPanelPosition,
+    isEditingLayout,
+    setEditingLayout,
     kvaserStatus,
     kvaserDeviceName
   } = useStore();
-
-  const [showLayoutMenu, setShowLayoutMenu] = useState(false);
 
   const handleConnectToggle = () => {
     setConnected(!isConnected);
   };
 
-  const panelNamesMapping: Record<string, string> = {
-    deviceManager: 'Logical ECUs Tree',
-    dbcManager: 'DBC Database Inspector',
-    liveViewer: 'Live CAN Log Grid',
-    livePlotter: 'Real-Time SVG Plotter',
-    transmitter: 'Message Transmitter Console',
-    diagnostics: 'Protocol Diagnostics Console',
-    falseSender: 'False CAN oscillo-simulator'
-  };
+
 
   return (
     <header className="h-16 border-b border-cyber-border bg-black/10 backdrop-blur-md px-6 flex items-center justify-between z-50 select-none">
@@ -158,68 +146,19 @@ export const Header: React.FC = () => {
 
       {/* Auxiliary Workspace Toolbar */}
       <div className="flex items-center gap-4">
-        {/* Customize Panels Dropdown */}
-        <div className="relative">
-          <button
-            onClick={() => setShowLayoutMenu(!showLayoutMenu)}
-            className="glass-button text-xs"
-            title="Configure Workspace Layout"
-          >
-            <LayoutGrid className="w-4 h-4 text-gray-500" />
-            <span>Customize Layout</span>
-          </button>
-          
-          {showLayoutMenu && (
-            <>
-              <div 
-                className="fixed inset-0 z-40" 
-                onClick={() => setShowLayoutMenu(false)}
-              />
-              <div className="absolute right-0 mt-2 w-72 glass-panel p-4 shadow-2xl z-50 border border-[var(--border-color)] space-y-3.5 text-left bg-[var(--bg-card)] text-[var(--text-color)]">
-                <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider block border-b border-[var(--border-color)] pb-2 mb-2">
-                  Workspace Layout Configuration
-                </span>
-                <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
-                  {Object.entries(panelNamesMapping).map(([key, label]) => {
-                    const isVisible = visiblePanels[key];
-                    const pos = panelPositions[key] || 'sidebar';
-                    return (
-                      <div key={key} className="flex flex-col gap-1.5 p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-colors border border-transparent hover:border-[var(--border-color)]">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-[var(--text-color)] truncate max-w-[180px]">{label}</span>
-                          <button
-                            onClick={() => togglePanelVisibility(key)}
-                            className={`w-8 h-4 rounded-full p-0.5 transition-colors focus:outline-none ${
-                              isVisible ? 'bg-cyber-accent animate-pulse-glow' : 'bg-gray-300 dark:bg-gray-700'
-                            }`}
-                          >
-                            <div className={`w-3 h-3 rounded-full bg-white transition-transform ${
-                              isVisible ? 'translate-x-4' : 'translate-x-0'
-                            }`} />
-                          </button>
-                        </div>
-                        {isVisible && (
-                          <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)] pl-1">
-                            <span>Position:</span>
-                            <select
-                              value={pos}
-                              onChange={(e) => setPanelPosition(key, e.target.value as 'sidebar' | 'main-top' | 'main-bottom')}
-                              className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-1.5 py-0.5 text-[10px] outline-none font-semibold focus:border-cyber-accent/40"
-                            >
-                              <option value="sidebar">Left Sidebar</option>
-                              <option value="main-top">Dashboard Top</option>
-                              <option value="main-bottom">Dashboard Bottom</option>
-                            </select>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+        {/* Edit Layout Toggle */}
+        <button
+          onClick={() => setEditingLayout(!isEditingLayout)}
+          className={`glass-button text-xs transition-all duration-150 ${
+            isEditingLayout
+              ? 'bg-cyber-accent border-cyber-accent text-black font-bold animate-pulse-glow shadow-[0_0_15px_rgba(16,185,129,0.3)]'
+              : ''
+          }`}
+          title={isEditingLayout ? "Exit Layout Editor" : "Enter Layout Editor"}
+        >
+          <LayoutGrid className={`w-4 h-4 ${isEditingLayout ? 'text-black' : 'text-gray-500'}`} />
+          <span>{isEditingLayout ? 'Done Editing' : 'Edit Layout'}</span>
+        </button>
 
         {/* Update Checker (Tauri Desktop Only) */}
         {isTauriEnv() && (

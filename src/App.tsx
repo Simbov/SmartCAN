@@ -11,11 +11,201 @@ import { ConnectionErrorModal } from './components/ConnectionErrorModal';
 import { checkForUpdates } from './lib/updater';
 import { useStore } from './store/useStore';
 
-import { Activity, Database } from 'lucide-react';
+import { Activity, Database, GripHorizontal, X, LayoutGrid } from 'lucide-react';
+
+const PANEL_NAMES: Record<string, string> = {
+  deviceManager: 'Logical ECUs Tree',
+  liveViewer: 'Live CAN Log Grid',
+  livePlotter: 'Real-Time SVG Plotter',
+  transmitter: 'Message Transmitter Console',
+  diagnostics: 'Protocol Diagnostics Console',
+  falseSender: 'False CAN oscillo-simulator'
+};
+
+interface PanelContainerProps {
+  panelKey: string;
+  children: React.ReactNode;
+}
+
+const PanelContainer: React.FC<PanelContainerProps> = ({ panelKey, children }) => {
+  const {
+    isEditingLayout,
+    panelWidths,
+    setPanelWidth,
+    setPanelHeight,
+    setPanelPosition,
+    panelPositions,
+    togglePanelVisibility,
+    panelOrder,
+    setPanelOrder
+  } = useStore();
+
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  const handleDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.setData('text/plain', panelKey);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const sourceKey = e.dataTransfer.getData('text/plain');
+    if (!sourceKey || sourceKey === panelKey) return;
+
+    const newOrder = [...panelOrder];
+    const sourceIdx = newOrder.indexOf(sourceKey);
+    const targetIdx = newOrder.indexOf(panelKey);
+
+    if (sourceIdx !== -1 && targetIdx !== -1) {
+      newOrder.splice(sourceIdx, 1);
+      newOrder.splice(targetIdx, 0, sourceKey);
+      setPanelOrder(newOrder);
+    }
+  };
+
+  const startResizeWidth = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const parent = container.parentElement?.parentElement;
+    if (!parent) return;
+
+    const parentWidth = parent.getBoundingClientRect().width;
+    const colWidth = parentWidth / 12; // 12-column grid
+    const startSpan = panelWidths[panelKey] || 6;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const spanDelta = Math.round(deltaX / colWidth);
+      const newSpan = Math.max(2, Math.min(12, startSpan + spanDelta));
+      setPanelWidth(panelKey, newSpan);
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const startResizeHeight = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const startHeight = container.getBoundingClientRect().height;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaY = moveEvent.clientY - startY;
+      const newHeight = Math.max(120, startHeight + deltaY);
+      setPanelHeight(panelKey, newHeight);
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const position = panelPositions[panelKey] || 'sidebar';
+  const showWidthHandle = position !== 'sidebar';
+
+  return (
+    <div
+      ref={containerRef}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={handleDrop}
+      className={`relative h-full w-full transition-all duration-150 ${
+        isEditingLayout
+          ? 'border-2 border-dashed border-cyber-accent/40 rounded-xl bg-black/20 p-2 shadow-[0_0_10px_rgba(16,185,129,0.05)] hover:border-cyber-accent hover:shadow-[0_0_15px_rgba(16,185,129,0.2)]'
+          : ''
+      }`}
+    >
+      {/* Edit Header Bar */}
+      {isEditingLayout && (
+        <div
+          className="flex items-center justify-between bg-[var(--bg-card-sub)] border border-[var(--border-color)] px-2.5 py-1.5 rounded-lg mb-2 text-[10px] font-bold select-none cursor-grab active:cursor-grabbing hover:bg-black/10 transition-colors"
+          draggable
+          onDragStart={handleDragStart}
+        >
+          <div className="flex items-center gap-1.5 min-w-0">
+            <GripHorizontal className="w-3.5 h-3.5 text-cyber-accent shrink-0" />
+            <span className="truncate text-[var(--text-color)]">{PANEL_NAMES[panelKey]}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+            <select
+              value={position}
+              onChange={(e) => setPanelPosition(panelKey, e.target.value as 'sidebar' | 'main-top' | 'main-bottom')}
+              className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-1.5 py-0.5 text-[9px] outline-none font-semibold focus:border-cyber-accent/40"
+            >
+              <option value="sidebar">Left Sidebar</option>
+              <option value="main-top">Dashboard Top</option>
+              <option value="main-bottom">Dashboard Bottom</option>
+            </select>
+            <button
+              onClick={() => togglePanelVisibility(panelKey)}
+              className="p-0.5 hover:bg-red-500/10 hover:text-red-400 rounded transition-colors"
+              title="Close Panel"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Panel Contents */}
+      <div className={isEditingLayout ? 'h-[calc(100%-34px)] overflow-hidden' : 'h-full'}>
+        {children}
+      </div>
+
+      {/* Resize Handles */}
+      {isEditingLayout && (
+        <>
+          {/* Right edge drag width handle */}
+          {showWidthHandle && (
+            <div
+              onMouseDown={startResizeWidth}
+              className="absolute -right-1.5 top-0 w-3 h-full cursor-col-resize z-50 hover:bg-cyber-accent/25 active:bg-cyber-accent/50 transition-colors"
+              title="Drag right edge to adjust width (snaps to grid)"
+            />
+          )}
+          {/* Bottom edge drag height handle */}
+          <div
+            onMouseDown={startResizeHeight}
+            className="absolute left-0 -bottom-1.5 w-full h-3 cursor-row-resize z-50 hover:bg-cyber-accent/25 active:bg-cyber-accent/50 transition-colors"
+            title="Drag bottom edge to adjust height"
+          />
+        </>
+      )}
+    </div>
+  );
+};
 
 const App: React.FC = () => {
-  const { visiblePanels, panelPositions, theme } = useStore();
+  const {
+    visiblePanels,
+    panelPositions,
+    panelWidths,
+    panelHeights,
+    panelOrder,
+    theme,
+    isEditingLayout,
+    togglePanelVisibility,
+    setPanelPosition
+  } = useStore();
+
   const [activeWorkspaceTab, setActiveWorkspaceTab] = React.useState<'monitor' | 'dbc'>('monitor');
+  const [activeDragOverZone, setActiveDragOverZone] = React.useState<'sidebar' | 'main-top' | 'main-bottom' | null>(null);
 
   // Sync html element theme classes
   React.useEffect(() => {
@@ -44,15 +234,11 @@ const App: React.FC = () => {
     falseSender: <FalseCanSender />
   };
 
-  const sidebarKeys = Object.keys(PANEL_COMPONENTS).filter(
-    key => visiblePanels[key] && panelPositions[key] === 'sidebar'
-  );
-  const mainTopKeys = Object.keys(PANEL_COMPONENTS).filter(
-    key => visiblePanels[key] && panelPositions[key] === 'main-top'
-  );
-  const mainBottomKeys = Object.keys(PANEL_COMPONENTS).filter(
-    key => visiblePanels[key] && panelPositions[key] === 'main-bottom'
-  );
+  const sortedKeys = [...panelOrder].filter(key => visiblePanels[key] && PANEL_COMPONENTS[key]);
+
+  const sidebarKeys = sortedKeys.filter(key => panelPositions[key] === 'sidebar');
+  const mainTopKeys = sortedKeys.filter(key => panelPositions[key] === 'main-top');
+  const mainBottomKeys = sortedKeys.filter(key => panelPositions[key] === 'main-bottom');
 
   const hasSidebar = sidebarKeys.length > 0;
   const hasTop = mainTopKeys.length > 0;
@@ -60,6 +246,26 @@ const App: React.FC = () => {
 
   // grid-cols layout based on whether we have a sidebar or not
   const mainGridCols = hasSidebar ? 'grid-cols-[330px_1fr]' : 'grid-cols-1';
+
+  const handleZoneDragOver = (e: React.DragEvent, zone: 'sidebar' | 'main-top' | 'main-bottom') => {
+    e.preventDefault();
+    if (activeDragOverZone !== zone) {
+      setActiveDragOverZone(zone);
+    }
+  };
+
+  const handleZoneDragLeave = () => {
+    setActiveDragOverZone(null);
+  };
+
+  const handleZoneDrop = (e: React.DragEvent, zone: 'sidebar' | 'main-top' | 'main-bottom') => {
+    e.preventDefault();
+    setActiveDragOverZone(null);
+    const sourceKey = e.dataTransfer.getData('text/plain');
+    if (sourceKey) {
+      setPanelPosition(sourceKey, zone);
+    }
+  };
 
   return (
     <div className="w-full h-full flex flex-col bg-[var(--bg-color)] text-[var(--text-color)] transition-colors duration-200">
@@ -96,64 +302,181 @@ const App: React.FC = () => {
       </div>
 
       {/* 2. Workspace container */}
-      <main className="flex-1 overflow-hidden min-h-0 flex flex-col">
+      <main className="flex-1 overflow-hidden min-h-0 flex flex-col relative">
         {activeWorkspaceTab === 'dbc' ? (
           <div className="flex-1 p-4 overflow-hidden min-h-0">
             <DbcManager />
           </div>
         ) : (
-          <div className={`flex-1 overflow-hidden grid ${mainGridCols} gap-4 p-4 min-h-0`}>
-            {hasSidebar && (
-              <section className="flex flex-col gap-4 overflow-hidden min-h-0">
-                {sidebarKeys.map(key => (
-                  <div key={key} className="flex-1 min-h-[150px] overflow-hidden">
-                    {PANEL_COMPONENTS[key]}
-                  </div>
-                ))}
-              </section>
-            )}
-
-            {(hasTop || hasBottom) ? (
-              <section className="flex flex-col gap-4 overflow-hidden min-h-0">
-                {hasTop && (
-                  <div 
-                    className="grid gap-4 overflow-hidden min-h-0"
-                    style={{
-                      gridTemplateColumns: `repeat(${mainTopKeys.length}, minmax(0, 1fr))`,
-                      flex: hasBottom ? '1.2' : '1',
-                      height: hasBottom ? 'auto' : '100%'
-                    }}
-                  >
-                    {mainTopKeys.map(key => (
-                      <div key={key} className="overflow-hidden h-full">
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+            <div className={`flex-1 overflow-auto grid ${mainGridCols} gap-4 p-4 min-h-0`}>
+              {/* Sidebar zone */}
+              {hasSidebar || isEditingLayout ? (
+                <section
+                  onDragOver={(e) => handleZoneDragOver(e, 'sidebar')}
+                  onDragLeave={handleZoneDragLeave}
+                  onDrop={(e) => handleZoneDrop(e, 'sidebar')}
+                  className={`flex flex-col gap-4 overflow-y-auto overflow-x-hidden p-2 rounded-xl transition-all duration-200 border-2 ${
+                    isEditingLayout
+                      ? activeDragOverZone === 'sidebar'
+                        ? 'border-cyber-accent border-solid bg-cyber-accent/10 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
+                        : 'border-dashed border-[var(--border-color)] bg-black/5'
+                      : 'border-transparent'
+                  }`}
+                  style={{ minWidth: isEditingLayout && !hasSidebar ? '300px' : 'auto' }}
+                >
+                  {sidebarKeys.map(key => (
+                    <div
+                      key={key}
+                      className="overflow-hidden shrink-0"
+                      style={{
+                        height: panelHeights[key] ? `${panelHeights[key]}px` : 'auto',
+                        minHeight: '120px'
+                      }}
+                    >
+                      <PanelContainer panelKey={key}>
                         {PANEL_COMPONENTS[key]}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      </PanelContainer>
+                    </div>
+                  ))}
+                  {isEditingLayout && sidebarKeys.length === 0 && (
+                    <div className="flex-1 flex items-center justify-center text-center p-4 border border-dashed border-[var(--border-color)] rounded-lg text-[10px] text-[var(--text-muted)] italic">
+                      Drag panels here to place in Sidebar
+                    </div>
+                  )}
+                </section>
+              ) : null}
 
-                {hasBottom && (
-                  <div 
-                    className="grid gap-4 overflow-hidden min-h-0"
-                    style={{
-                      gridTemplateColumns: `repeat(${mainBottomKeys.length}, minmax(0, 1fr))`,
-                      flex: '1',
-                      height: hasTop ? 'auto' : '100%'
-                    }}
-                  >
-                    {mainBottomKeys.map(key => (
-                      <div key={key} className="overflow-hidden h-full">
-                        {PANEL_COMPONENTS[key]}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-            ) : (
-              <div className="flex flex-col items-center justify-center text-center p-8 glass-panel h-full w-full">
-                <span className="text-sm text-[var(--text-muted)] font-medium">
-                  No panels are currently visible. Click "Customize Layout" in the header to show panels.
-                </span>
+              {/* Main dashboard columns */}
+              {(hasTop || hasBottom || isEditingLayout) ? (
+                <section className="flex flex-col gap-4 overflow-y-auto p-1 min-h-0">
+                  {/* Top zone */}
+                  {(hasTop || isEditingLayout) && (
+                    <div
+                      onDragOver={(e) => handleZoneDragOver(e, 'main-top')}
+                      onDragLeave={handleZoneDragLeave}
+                      onDrop={(e) => handleZoneDrop(e, 'main-top')}
+                      className={`grid grid-cols-12 gap-4 p-2 rounded-xl transition-all duration-200 border-2 ${
+                        isEditingLayout
+                          ? activeDragOverZone === 'main-top'
+                            ? 'border-cyber-accent border-solid bg-cyber-accent/10 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
+                            : 'border-dashed border-[var(--border-color)] bg-black/5'
+                          : 'border-transparent'
+                      }`}
+                      style={{
+                        flex: hasBottom ? '1.2' : '1',
+                        minHeight: isEditingLayout && mainTopKeys.length === 0 ? '120px' : 'auto'
+                      }}
+                    >
+                      {mainTopKeys.map(key => {
+                        const span = panelWidths[key] || 6;
+                        const height = panelHeights[key];
+                        return (
+                          <div
+                            key={key}
+                            className="overflow-hidden"
+                            style={{
+                              gridColumn: `span ${span} / span ${span}`,
+                              height: height ? `${height}px` : 'auto',
+                              minHeight: '120px'
+                            }}
+                          >
+                            <PanelContainer panelKey={key}>
+                              {PANEL_COMPONENTS[key]}
+                            </PanelContainer>
+                          </div>
+                        );
+                      })}
+                      {isEditingLayout && mainTopKeys.length === 0 && (
+                        <div className="col-span-12 flex items-center justify-center text-center p-6 border border-dashed border-[var(--border-color)] rounded-lg text-[10px] text-[var(--text-muted)] italic">
+                          Drag panels here to place in Dashboard Top
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Bottom zone */}
+                  {(hasBottom || isEditingLayout) && (
+                    <div
+                      onDragOver={(e) => handleZoneDragOver(e, 'main-bottom')}
+                      onDragLeave={handleZoneDragLeave}
+                      onDrop={(e) => handleZoneDrop(e, 'main-bottom')}
+                      className={`grid grid-cols-12 gap-4 p-2 rounded-xl transition-all duration-200 border-2 ${
+                        isEditingLayout
+                          ? activeDragOverZone === 'main-bottom'
+                            ? 'border-cyber-accent border-solid bg-cyber-accent/10 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
+                            : 'border-dashed border-[var(--border-color)] bg-black/5'
+                          : 'border-transparent'
+                      }`}
+                      style={{
+                        flex: '1',
+                        minHeight: isEditingLayout && mainBottomKeys.length === 0 ? '120px' : 'auto'
+                      }}
+                    >
+                      {mainBottomKeys.map(key => {
+                        const span = panelWidths[key] || 6;
+                        const height = panelHeights[key];
+                        return (
+                          <div
+                            key={key}
+                            className="overflow-hidden"
+                            style={{
+                              gridColumn: `span ${span} / span ${span}`,
+                              height: height ? `${height}px` : 'auto',
+                              minHeight: '120px'
+                            }}
+                          >
+                            <PanelContainer panelKey={key}>
+                              {PANEL_COMPONENTS[key]}
+                            </PanelContainer>
+                          </div>
+                        );
+                      })}
+                      {isEditingLayout && mainBottomKeys.length === 0 && (
+                        <div className="col-span-12 flex items-center justify-center text-center p-6 border border-dashed border-[var(--border-color)] rounded-lg text-[10px] text-[var(--text-muted)] italic">
+                          Drag panels here to place in Dashboard Bottom
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </section>
+              ) : (
+                <div className="flex flex-col items-center justify-center text-center p-8 glass-panel h-full w-full">
+                  <span className="text-sm text-[var(--text-muted)] font-medium">
+                    No panels are currently visible. Click "Edit Layout" in the header to customize panels.
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Layout Toggle Dock */}
+            {isEditingLayout && (
+              <div className="mx-4 mb-4 p-3 glass-panel bg-[var(--bg-card)] border-dashed border-cyber-accent/30 flex items-center justify-between gap-4 animate-fade-in z-30 shrink-0">
+                <div className="flex items-center gap-2">
+                  <LayoutGrid className="w-4 h-4 text-cyber-accent" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-color)]">
+                    Add / Remove Panels
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {Object.entries(PANEL_NAMES).map(([key, label]) => {
+                    const isVisible = visiblePanels[key];
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => togglePanelVisibility(key)}
+                        className={`px-3 py-1.5 rounded text-[11px] font-semibold border flex items-center gap-1.5 transition-all duration-150 active:scale-95 ${
+                          isVisible
+                            ? 'bg-cyber-accent/15 border-cyber-accent/30 text-cyber-accent'
+                            : 'bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-color)] hover:border-[var(--text-muted)]'
+                        }`}
+                      >
+                        <span className="text-xs font-bold">{isVisible ? '✓' : '+'}</span>
+                        <span>{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

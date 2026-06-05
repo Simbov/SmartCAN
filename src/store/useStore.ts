@@ -87,6 +87,10 @@ interface CanStore {
   theme: 'light' | 'dark';
   visiblePanels: Record<string, boolean>;
   panelPositions: Record<string, 'sidebar' | 'main-top' | 'main-bottom'>;
+  isEditingLayout: boolean;
+  panelWidths: Record<string, number>;
+  panelHeights: Record<string, number>;
+  panelOrder: string[];
   
   // DBC Databases
   dbcs: Record<string, DbcDatabase>;
@@ -120,6 +124,10 @@ interface CanStore {
   toggleTheme: () => void;
   togglePanelVisibility: (panelName: string) => void;
   setPanelPosition: (panelName: string, position: 'sidebar' | 'main-top' | 'main-bottom') => void;
+  setEditingLayout: (isEditing: boolean) => void;
+  setPanelWidth: (panelName: string, width: number) => void;
+  setPanelHeight: (panelName: string, height: number) => void;
+  setPanelOrder: (order: string[]) => void;
   loadDbcFile: (name: string, content: string) => void;
   unloadDbc: () => void;
   
@@ -195,6 +203,34 @@ export const useStore = create<CanStore>((set, get) => {
       diagnostics: 'main-bottom',
       falseSender: 'main-bottom'
     },
+    isEditingLayout: false,
+    panelWidths: {
+      deviceManager: 12,
+      dbcManager: 12,
+      liveViewer: 6,
+      livePlotter: 6,
+      transmitter: 6,
+      diagnostics: 6,
+      falseSender: 12
+    },
+    panelHeights: {
+      deviceManager: 260,
+      dbcManager: 260,
+      liveViewer: 360,
+      livePlotter: 360,
+      transmitter: 260,
+      diagnostics: 260,
+      falseSender: 260
+    },
+    panelOrder: [
+      'deviceManager',
+      'dbcManager',
+      'liveViewer',
+      'livePlotter',
+      'transmitter',
+      'diagnostics',
+      'falseSender'
+    ],
     dbcs: {
       'Default J1939 Database': defaultDbcJ1939,
       'Default CANopen Database': defaultDbcCanopen
@@ -302,6 +338,24 @@ export const useStore = create<CanStore>((set, get) => {
         [panelName]: position
       }
     })),
+
+    setEditingLayout: (isEditingLayout) => set({ isEditingLayout }),
+
+    setPanelWidth: (panelName, width) => set(state => ({
+      panelWidths: {
+        ...state.panelWidths,
+        [panelName]: Math.max(1, Math.min(12, width))
+      }
+    })),
+
+    setPanelHeight: (panelName, height) => set(state => ({
+      panelHeights: {
+        ...state.panelHeights,
+        [panelName]: Math.max(120, height)
+      }
+    })),
+
+    setPanelOrder: (panelOrder) => set({ panelOrder }),
 
     setConnected: async (isConnected) => {
       const state = get();

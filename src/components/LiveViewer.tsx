@@ -215,14 +215,15 @@ export const LiveViewer: React.FC = () => {
       </div>
 
       {/* Filter search and display toggles bar */}
-      <div className="mb-3 flex flex-col md:flex-row items-stretch md:items-center gap-3">
-        <div className="relative flex-1">
+      <div className="mb-3 flex flex-wrap items-center gap-3 justify-between">
+        <div className="relative min-w-[200px] flex-1">
           <input
             type="text"
             placeholder="Filter logs by Hex ID, message name, payload bytes..."
             value={filterText}
             onChange={(e) => setFilterText(e.target.value)}
-            className="glass-input w-full pl-8 py-1.5 text-xs rounded"
+            className="glass-input w-full py-1.5 text-xs rounded"
+            style={{ paddingLeft: '2.25rem' }}
           />
           <Filter className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2" />
         </div>

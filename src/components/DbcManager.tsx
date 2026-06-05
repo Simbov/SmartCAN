@@ -129,7 +129,8 @@ export const DbcManager: React.FC = () => {
               placeholder="Search ID, name, sender..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="glass-input w-full pl-8 py-1.5 text-xs"
+              className="glass-input w-full py-1.5 text-xs"
+              style={{ paddingLeft: '2.25rem' }}
             />
             <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2" />
           </div>
