@@ -167,17 +167,22 @@ pub fn start_kvaser(app: AppHandle, baud_rate: u32, state: State<'_, KvaserState
     // Get CANlib or return library-not-found error
     let canlib = get_canlib()?;
 
+    println!("[Kvaser] Initializing connection scan...");
     let mut num_channels = 0;
     let status = unsafe {
         if let Some(enum_hw) = canlib.can_enum_hardware_ex {
+            println!("[Kvaser] Dynamic hardware re-enumeration available. Scanning devices...");
             enum_hw(&mut num_channels)
         } else {
+            println!("[Kvaser] Standard channel count retrieval (no hot-plug re-enumeration).");
             (canlib.can_get_number_of_channels)(&mut num_channels)
         }
     };
     if status < 0 {
+        println!("[Kvaser Error] Failed to retrieve/enumerate channel count: code {}", status);
         return Err(format!("Failed to retrieve/enumerate channel count (code {})", status));
     }
+    println!("[Kvaser] Detected {} available channels.", num_channels);
     if num_channels <= 0 {
         return Err("No Kvaser hardware channels detected. Make sure your Kvaser Leaf device is plugged in.".to_string());
     }
@@ -189,9 +194,12 @@ pub fn start_kvaser(app: AppHandle, baud_rate: u32, state: State<'_, KvaserState
 
     unsafe {
         // 1. Try to find a physical channel first (flag = 0)
+        println!("[Kvaser] --- Step 1: Scanning for physical devices (flag = 0) ---");
         for ch in 0..num_channels {
+            println!("[Kvaser] Attempting to open channel {} as physical...", ch);
             let handle = (canlib.can_open_channel)(ch, 0);
             if handle >= 0 {
+                println!("[Kvaser] Channel {} opened successfully (handle: {}). Querying properties...", ch, handle);
                 // Query properties of the opened channel to ensure it's not virtual
                 let mut caps = 0u32;
                 let cap_status = (canlib.can_get_channel_data)(
@@ -227,12 +235,18 @@ pub fn start_kvaser(app: AppHandle, baud_rate: u32, state: State<'_, KvaserState
                 let is_virtual_type = type_status >= 0 && card_type == 1; // canHWTYPE_VIRTUAL = 1
                 let is_virtual_name = name.to_lowercase().contains("virtual");
 
+                println!("[Kvaser] Channel {} properties:", ch);
+                println!("  - Name: \"{}\" (status: {})", name, name_status);
+                println!("  - Capabilities: 0x{:08X} (virtual flag: {}, status: {})", caps, is_virtual_cap, cap_status);
+                println!("  - Card Type: {} (virtual flag: {}, status: {})", card_type, is_virtual_type, type_status);
+
                 if is_virtual_cap || is_virtual_type || is_virtual_name {
-                    // Skip virtual channels in the physical scan phase
+                    println!("[Kvaser] Channel {} is identified as virtual. Skipping in physical scan phase.", ch);
                     (canlib.can_close)(handle);
                     continue;
                 }
 
+                println!("[Kvaser] Channel {} is PHYSICAL. Configuring baud rate: {}...", ch, baud_rate);
                 let freq_preset = match baud_rate {
                     125000 => -9,
                     250000 => -3,
@@ -243,26 +257,35 @@ pub fn start_kvaser(app: AppHandle, baud_rate: u32, state: State<'_, KvaserState
                 
                 let param_status = (canlib.can_set_bus_params)(handle, freq_preset, 0, 0, 0, 0, 0);
                 if param_status >= 0 {
+                    println!("[Kvaser] Bus parameters configured successfully on channel {}.", ch);
                     let bus_status = (canlib.can_bus_on)(handle);
                     if bus_status >= 0 {
+                        println!("[Kvaser] Bus set to ON for channel {}. Physical connection established!", ch);
                         channel_opened = Some(handle);
                         opened_channel_idx = ch;
                         opened_device_name = name;
                         break;
                     } else {
+                        println!("[Kvaser Error] Failed to turn bus ON on channel {}: code {}", ch, bus_status);
                         (canlib.can_close)(handle);
                     }
                 } else {
+                    println!("[Kvaser Error] Failed to set bus parameters on channel {}: code {}", ch, param_status);
                     (canlib.can_close)(handle);
                 }
+            } else {
+                println!("[Kvaser] Channel {} cannot be opened as physical (code {}). Skipping.", ch, handle);
             }
         }
 
         // 2. Fallback to virtual channel (flag = canOPEN_ACCEPT_VIRTUAL)
         if channel_opened.is_none() {
+            println!("[Kvaser] --- Step 2: Fallback to virtual devices (flag = canOPEN_ACCEPT_VIRTUAL) ---");
             for ch in 0..num_channels {
+                println!("[Kvaser] Attempting to open channel {} as virtual...", ch);
                 let handle = (canlib.can_open_channel)(ch, 0x0020);
                 if handle >= 0 {
+                    println!("[Kvaser] Channel {} opened successfully as virtual (handle: {}). Configuring...", ch, handle);
                     let freq_preset = match baud_rate {
                         125000 => -9,
                         250000 => -3,
@@ -273,6 +296,7 @@ pub fn start_kvaser(app: AppHandle, baud_rate: u32, state: State<'_, KvaserState
                     
                     let param_status = (canlib.can_set_bus_params)(handle, freq_preset, 0, 0, 0, 0, 0);
                     if param_status >= 0 {
+                        println!("[Kvaser] Bus parameters configured successfully on virtual channel {}.", ch);
                         let bus_status = (canlib.can_bus_on)(handle);
                         if bus_status >= 0 {
                             let mut buf = vec![0u8; 256];
@@ -289,17 +313,22 @@ pub fn start_kvaser(app: AppHandle, baud_rate: u32, state: State<'_, KvaserState
                                 format!("Kvaser Virtual Channel {}", ch)
                             };
 
+                            println!("[Kvaser] Bus set to ON for virtual channel {}. Virtual connection established! (Name: \"{}\")", ch, name);
                             channel_opened = Some(handle);
                             opened_channel_idx = ch;
                             opened_device_name = name;
                             is_virtual = true;
                             break;
                         } else {
+                            println!("[Kvaser Error] Failed to turn bus ON on virtual channel {}: code {}", ch, bus_status);
                             (canlib.can_close)(handle);
                         }
                     } else {
+                        println!("[Kvaser Error] Failed to set bus parameters on virtual channel {}: code {}", ch, param_status);
                         (canlib.can_close)(handle);
                     }
+                } else {
+                    println!("[Kvaser] Channel {} cannot be opened as virtual (code {}). Skipping.", ch, handle);
                 }
             }
         }
@@ -308,6 +337,7 @@ pub fn start_kvaser(app: AppHandle, baud_rate: u32, state: State<'_, KvaserState
     let handle_val = match channel_opened {
         Some(h) => h,
         None => {
+            println!("[Kvaser Error] Scan finished but could not open or configure any CAN channel.");
             return Err("Kvaser driver found but failed to open or configure any CAN channel. Please check that the channel isn't already occupied by another application and that the baud rate is supported.".to_string());
         }
     };
