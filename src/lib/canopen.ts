@@ -256,3 +256,49 @@ export function handleSdoRequest(
     updatedNode
   };
 }
+
+/**
+ * Parses a standard 11-bit CANopen COB-ID to extract Function Code and Node ID.
+ */
+export function parseCanopenId(id: number): {
+  functionCode: number;
+  nodeId: number;
+  interpretation: string;
+} {
+  const functionCode = id >> 7;
+  const nodeId = id & 0x7F;
+  
+  let interpretation = 'Unknown';
+  switch (functionCode) {
+    case 0x0: interpretation = 'NMT Master Command'; break;
+    case 0x1: interpretation = id === 0x080 ? 'SYNC' : 'EMCY (Emergency)'; break;
+    case 0x2: interpretation = 'TIME (Timestamp)'; break;
+    case 0x3: interpretation = 'PDO1 Tx'; break;
+    case 0x4: interpretation = 'PDO1 Rx'; break;
+    case 0x5: interpretation = 'PDO2 Tx'; break;
+    case 0x6: interpretation = 'PDO2 Rx'; break;
+    case 0x7: interpretation = 'PDO3 Tx'; break;
+    case 0x8: interpretation = 'PDO3 Rx'; break;
+    case 0x9: interpretation = 'PDO4 Tx'; break;
+    case 0xA: interpretation = 'PDO4 Rx'; break;
+    case 0xB: interpretation = 'SDO Tx (Response)'; break;
+    case 0xC: interpretation = 'SDO Rx (Request)'; break;
+    case 0xE: interpretation = 'Heartbeat/Boot-up'; break;
+  }
+  
+  return {
+    functionCode,
+    nodeId,
+    interpretation
+  };
+}
+
+/**
+ * Extracts Object Dictionary index and sub-index from an SDO payload.
+ */
+export function parseCanopenSdo(data: Uint8Array): { index: number; subIndex: number } | null {
+  if (data.length < 4) return null;
+  const index = data[1] | (data[2] << 8);
+  const subIndex = data[3];
+  return { index, subIndex };
+}

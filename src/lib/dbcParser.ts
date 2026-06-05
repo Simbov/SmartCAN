@@ -59,58 +59,60 @@ export function parseDbc(content: string): DbcDatabase {
     // 2. Parse Messages
     if (line.startsWith('BO_')) {
       const match = line.match(messageRegex);
-      if (match) {
-        const id = parseInt(match[1], 10);
-        const name = match[2];
-        const dlc = parseInt(match[3], 10);
-        const sender = match[4];
-        
-        currentMessage = {
-          id,
-          name,
-          dlc,
-          sender,
-          signals: []
-        };
-        database.messages[id] = currentMessage;
+      if (!match) {
+        throw new SyntaxError(`Malformed DBC message definition line: "${line}"`);
       }
+      const id = parseInt(match[1], 10);
+      const name = match[2];
+      const dlc = parseInt(match[3], 10);
+      const sender = match[4];
+      
+      currentMessage = {
+        id,
+        name,
+        dlc,
+        sender,
+        signals: []
+      };
+      database.messages[id] = currentMessage;
       continue;
     }
 
     // 3. Parse Signals
     if (line.startsWith('SG_') && currentMessage) {
       const match = line.match(signalRegex);
-      if (match) {
-        const name = match[1];
-        const startBit = parseInt(match[2], 10);
-        const length = parseInt(match[3], 10);
-        const isLittleEndian = match[4] === '1';
-        const isSigned = match[5] === '-';
-        const factor = parseFloat(match[6]);
-        const offset = parseFloat(match[7]);
-        const min = parseFloat(match[8]);
-        const max = parseFloat(match[9]);
-        const unit = match[10];
-        
-        // Parse receivers
-        const receiversPart = match[11] ? match[11].trim() : '';
-        const receivers = receiversPart.split(/\s*,\s*|\s+/).filter(Boolean);
-
-        currentMessage.signals.push({
-          name,
-          startBit,
-          length,
-          isLittleEndian,
-          isSigned,
-          factor,
-          offset,
-          min,
-          max,
-          unit,
-          receivers,
-          valueDescriptions: {}
-        });
+      if (!match) {
+        throw new SyntaxError(`Malformed DBC signal definition line: "${line}"`);
       }
+      const name = match[1];
+      const startBit = parseInt(match[2], 10);
+      const length = parseInt(match[3], 10);
+      const isLittleEndian = match[4] === '1';
+      const isSigned = match[5] === '-';
+      const factor = parseFloat(match[6]);
+      const offset = parseFloat(match[7]);
+      const min = parseFloat(match[8]);
+      const max = parseFloat(match[9]);
+      const unit = match[10];
+      
+      // Parse receivers
+      const receiversPart = match[11] ? match[11].trim() : '';
+      const receivers = receiversPart.split(/\s*,\s*|\s+/).filter(Boolean);
+
+      currentMessage.signals.push({
+        name,
+        startBit,
+        length,
+        isLittleEndian,
+        isSigned,
+        factor,
+        offset,
+        min,
+        max,
+        unit,
+        receivers,
+        valueDescriptions: {}
+      });
       continue;
     }
 
@@ -141,6 +143,10 @@ export function parseDbc(content: string): DbcDatabase {
       }
       continue;
     }
+  }
+
+  if (database.nodes.length === 0 && Object.keys(database.messages).length === 0) {
+    throw new SyntaxError("Invalid DBC file: contains no valid node or message definitions.");
   }
 
   return database;

@@ -25,9 +25,13 @@ export function buildUpdatePrompt(version: string, currentVersion: string, body?
   return `${header}${notesBlock}\n\nDownload and install now?`;
 }
 
+let isChecking = false;
+
 export async function checkForUpdates({ silent = true } = {}) {
+  if (isChecking) return;
   if (!isTauriEnv()) return;
 
+  isChecking = true;
   try {
     const { check } = await import('@tauri-apps/plugin-updater');
     const update = await check();
@@ -68,5 +72,7 @@ export async function checkForUpdates({ silent = true } = {}) {
         kind: 'error',
       });
     }
+  } finally {
+    isChecking = false;
   }
 }

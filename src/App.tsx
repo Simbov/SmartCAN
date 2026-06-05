@@ -39,7 +39,10 @@ const PanelContainer: React.FC<PanelContainerProps> = ({ panelKey, children }) =
     panelOrder,
     setPanelOrder,
     activeDragKey,
-    setActiveDragKey
+    setActiveDragKey,
+    dragOverTargetKey,
+    setDragOverTargetKey,
+    setDragOverZone
   } = useStore();
 
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -47,34 +50,56 @@ const PanelContainer: React.FC<PanelContainerProps> = ({ panelKey, children }) =
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData('text/plain', panelKey);
     e.dataTransfer.effectAllowed = 'move';
-    setActiveDragKey(panelKey);
+    // Defer setting activeDragKey to avoid synchronous DOM re-render that cancels drag in some WebViews/browsers.
+    setTimeout(() => {
+      setActiveDragKey(panelKey);
+    }, 0);
   };
 
   const handleDragEnd = () => {
     setActiveDragKey(null);
+    setDragOverTargetKey(null);
+    setDragOverZone(null);
   };
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
-    const sourceKey = activeDragKey;
+    if (activeDragKey && activeDragKey !== panelKey) {
+      setDragOverTargetKey(panelKey);
+    }
+  };
+
+  const handleDragLeave = () => {
+    if (dragOverTargetKey === panelKey) {
+      setDragOverTargetKey(null);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const sourceKey = activeDragKey || e.dataTransfer.getData('text/plain');
     if (!sourceKey || sourceKey === panelKey) return;
 
-    // 1. Instantly move zone of source panel to match target panel
+    // 1. Update position zone of the dragged panel to match target panel
     const targetZone = panelPositions[panelKey] || 'sidebar';
-    if (panelPositions[sourceKey] !== targetZone) {
-      setPanelPosition(sourceKey, targetZone);
-    }
+    setPanelPosition(sourceKey, targetZone);
 
-    // 2. Instantly reorder panelOrder
+    // 2. Reorder panelOrder list
     const newOrder = [...panelOrder];
     const sourceIdx = newOrder.indexOf(sourceKey);
     const targetIdx = newOrder.indexOf(panelKey);
 
-    if (sourceIdx !== -1 && targetIdx !== -1 && sourceIdx !== targetIdx) {
+    if (sourceIdx !== -1 && targetIdx !== -1) {
       newOrder.splice(sourceIdx, 1);
-      newOrder.splice(targetIdx, 0, sourceKey);
+      const nextTargetIdx = newOrder.indexOf(panelKey);
+      newOrder.splice(nextTargetIdx, 0, sourceKey);
       setPanelOrder(newOrder);
     }
+
+    setActiveDragKey(null);
+    setDragOverTargetKey(null);
+    setDragOverZone(null);
   };
 
   const startResizeWidth = (e: React.MouseEvent) => {
@@ -134,31 +159,40 @@ const PanelContainer: React.FC<PanelContainerProps> = ({ panelKey, children }) =
   const position = panelPositions[panelKey] || 'sidebar';
   const showWidthHandle = position !== 'sidebar';
   const isDraggingThis = activeDragKey === panelKey;
+  const isDragOverThis = dragOverTargetKey === panelKey;
 
   return (
     <div
       ref={containerRef}
       onDragOver={(e) => e.preventDefault()}
       onDragEnter={handleDragEnter}
-      className={`relative h-full w-full transition-all duration-150 rounded-xl ${
-        isDraggingThis
-          ? 'opacity-30 border-2 border-dashed border-cyber-accent bg-cyber-accent/5 scale-95 shadow-[0_0_15px_rgba(16,185,129,0.2)] animate-pulse z-0'
-          : isEditingLayout
-            ? 'border-2 border-dashed border-cyber-accent/40 bg-black/20 p-2 shadow-[0_0_10px_rgba(16,185,129,0.05)] hover:border-cyber-accent hover:shadow-[0_0_15px_rgba(16,185,129,0.2)] z-10'
-            : 'z-10'
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      data-panel-key={panelKey}
+      className={`relative h-full w-full transition-all duration-200 rounded-xl ${
+        isEditingLayout
+          ? `border-2 p-2 ${
+              isDraggingThis
+                ? 'opacity-40 border-dashed border-cyber-accent/40 bg-cyber-accent/5 z-0'
+                : isDragOverThis
+                  ? 'border-solid border-cyber-accent bg-cyber-accent/10 shadow-[0_0_15px_rgba(16,185,129,0.3)] z-50'
+                  : 'border-dashed border-cyber-accent/30 bg-black/10 shadow-[0_0_10px_rgba(16,185,129,0.03)] hover:border-cyber-accent/80 hover:shadow-[0_0_15px_rgba(16,185,129,0.15)] z-10'
+            }`
+          : 'z-10'
       }`}
     >
       {/* Edit Header Bar */}
       {isEditingLayout && (
         <div
+          data-drag-handle={panelKey}
           className={`flex items-center justify-between bg-[var(--bg-card-sub)] border border-[var(--border-color)] px-2.5 py-1.5 rounded-lg mb-2 text-[10px] font-bold select-none transition-colors ${
             isDraggingThis ? 'cursor-grabbing' : 'cursor-grab hover:bg-black/10'
           }`}
-          draggable
+          draggable={true}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex items-center gap-1.5 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0 pointer-events-none">
             <GripHorizontal className="w-3.5 h-3.5 text-cyber-accent shrink-0" />
             <span className="truncate text-[var(--text-color)]">{PANEL_NAMES[panelKey]}</span>
           </div>
@@ -174,15 +208,15 @@ const PanelContainer: React.FC<PanelContainerProps> = ({ panelKey, children }) =
         </div>
       )}
 
-      {/* Panel Contents (Hidden if dragging this tile to represent ghost placeholder) */}
-      <div className={isDraggingThis ? 'invisible' : isEditingLayout ? 'h-[calc(100%-34px)] overflow-hidden' : 'h-full'}>
+      {/* Panel Contents */}
+      <div className={isEditingLayout ? 'h-[calc(100%-34px)] overflow-hidden pointer-events-none' : 'h-full'}>
         {children}
       </div>
 
       {/* Resize Handles */}
       {isEditingLayout && !isDraggingThis && (
         <>
-          {/* Right edge drag width handle */}
+          {/* Right drag handle */}
           {showWidthHandle && (
             <div
               onMouseDown={startResizeWidth}
@@ -190,7 +224,7 @@ const PanelContainer: React.FC<PanelContainerProps> = ({ panelKey, children }) =
               title="Drag right edge to adjust width (snaps to grid)"
             />
           )}
-          {/* Bottom edge drag height handle */}
+          {/* Bottom drag handle */}
           <div
             onMouseDown={startResizeHeight}
             className="absolute left-0 -bottom-1.5 w-full h-3 cursor-row-resize z-50 hover:bg-cyber-accent/25 active:bg-cyber-accent/50 transition-colors"
@@ -213,11 +247,14 @@ const App: React.FC = () => {
     isEditingLayout,
     activeDragKey,
     togglePanelVisibility,
-    setPanelPosition
+    setPanelPosition,
+    setActiveDragKey,
+    setDragOverTargetKey,
+    dragOverZone,
+    setDragOverZone
   } = useStore();
 
   const [activeWorkspaceTab, setActiveWorkspaceTab] = React.useState<'monitor' | 'dbc'>('monitor');
-  const [activeDragOverZone, setActiveDragOverZone] = React.useState<'sidebar' | 'main-top' | 'main-bottom' | null>(null);
 
   // Sync html element theme classes
   React.useEffect(() => {
@@ -257,26 +294,28 @@ const App: React.FC = () => {
   const hasBottom = mainBottomKeys.length > 0;
 
   // grid-cols layout based on whether we have a sidebar or not
-  const mainGridCols = hasSidebar ? 'grid-cols-[330px_1fr]' : 'grid-cols-1';
+  const mainGridCols = (hasSidebar || isEditingLayout) ? 'grid-cols-[330px_1fr]' : 'grid-cols-1';
 
   const handleZoneDragOver = (e: React.DragEvent, zone: 'sidebar' | 'main-top' | 'main-bottom') => {
     e.preventDefault();
-    const sourceKey = activeDragKey;
-    if (sourceKey && panelPositions[sourceKey] !== zone) {
-      setPanelPosition(sourceKey, zone);
-    }
-    if (activeDragOverZone !== zone) {
-      setActiveDragOverZone(zone);
+    if (dragOverZone !== zone) {
+      setDragOverZone(zone);
     }
   };
 
   const handleZoneDragLeave = () => {
-    setActiveDragOverZone(null);
+    setDragOverZone(null);
   };
 
-  const handleZoneDrop = (e: React.DragEvent) => {
+  const handleZoneDrop = (e: React.DragEvent, zone: 'sidebar' | 'main-top' | 'main-bottom') => {
     e.preventDefault();
-    setActiveDragOverZone(null);
+    setDragOverZone(null);
+    const sourceKey = activeDragKey || e.dataTransfer.getData('text/plain');
+    if (sourceKey) {
+      setPanelPosition(sourceKey, zone);
+    }
+    setActiveDragKey(null);
+    setDragOverTargetKey(null);
   };
 
   return (
@@ -327,10 +366,10 @@ const App: React.FC = () => {
                 <section
                   onDragOver={(e) => handleZoneDragOver(e, 'sidebar')}
                   onDragLeave={handleZoneDragLeave}
-                  onDrop={handleZoneDrop}
+                  onDrop={(e) => handleZoneDrop(e, 'sidebar')}
                   className={`flex flex-col gap-4 overflow-y-auto overflow-x-hidden p-2 rounded-xl transition-all duration-200 border-2 ${
                     isEditingLayout
-                      ? activeDragOverZone === 'sidebar'
+                      ? dragOverZone === 'sidebar'
                         ? 'border-cyber-accent border-solid bg-cyber-accent/10 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
                         : 'border-dashed border-[var(--border-color)] bg-black/5'
                       : 'border-transparent'
@@ -361,37 +400,49 @@ const App: React.FC = () => {
 
               {/* Main dashboard columns */}
               {(hasTop || hasBottom || isEditingLayout) ? (
-                <section className="flex flex-col gap-4 overflow-y-auto p-1 min-h-0">
+                <section className={`flex flex-col gap-4 p-1 min-h-0 ${!isEditingLayout && sortedKeys.length === 1 ? 'h-full overflow-hidden' : 'overflow-y-auto'}`}>
                   {/* Top zone */}
                   {(hasTop || isEditingLayout) && (
                     <div
                       onDragOver={(e) => handleZoneDragOver(e, 'main-top')}
                       onDragLeave={handleZoneDragLeave}
-                      onDrop={handleZoneDrop}
-                      className={`grid grid-cols-12 gap-4 p-2 rounded-xl transition-all duration-200 border-2 ${
-                        isEditingLayout
-                          ? activeDragOverZone === 'main-top'
-                            ? 'border-cyber-accent border-solid bg-cyber-accent/10 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
-                            : 'border-dashed border-[var(--border-color)] bg-black/5'
-                          : 'border-transparent'
-                      }`}
+                      onDrop={(e) => handleZoneDrop(e, 'main-top')}
+                      className={!isEditingLayout && sortedKeys.length === 1
+                        ? "h-full w-full flex flex-col border-transparent"
+                        : `grid grid-cols-12 gap-4 p-2 rounded-xl transition-all duration-200 border-2 ${
+                            isEditingLayout
+                              ? dragOverZone === 'main-top'
+                                ? 'border-cyber-accent border-solid bg-cyber-accent/10 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
+                                : 'border-dashed border-[var(--border-color)] bg-black/5'
+                              : 'border-transparent'
+                          }`
+                      }
                       style={{
                         flex: hasBottom ? '1.2' : '1',
                         minHeight: isEditingLayout && mainTopKeys.length === 0 ? '120px' : 'auto'
                       }}
                     >
                       {mainTopKeys.map(key => {
-                        const span = panelWidths[key] || 6;
+                        const isSingleInZone = mainTopKeys.length === 1;
+                        const isSingleOverall = sortedKeys.length === 1;
+                        const span = isSingleInZone ? 12 : (panelWidths[key] || 6);
                         const height = panelHeights[key];
+                        
+                        const itemStyle = isSingleOverall
+                          ? (isEditingLayout
+                              ? { gridColumn: 'span 12 / span 12', height: '100%', width: '100%' }
+                              : { width: '100%', height: '100%', flex: 1 })
+                          : {
+                              gridColumn: `span ${span} / span ${span}`,
+                              height: height ? `${height}px` : 'auto',
+                              minHeight: '120px'
+                            };
+
                         return (
                           <div
                             key={key}
                             className="overflow-hidden"
-                            style={{
-                              gridColumn: `span ${span} / span ${span}`,
-                              height: height ? `${height}px` : 'auto',
-                              minHeight: '120px'
-                            }}
+                            style={itemStyle}
                           >
                             <PanelContainer panelKey={key}>
                               {PANEL_COMPONENTS[key]}
@@ -412,10 +463,10 @@ const App: React.FC = () => {
                     <div
                       onDragOver={(e) => handleZoneDragOver(e, 'main-bottom')}
                       onDragLeave={handleZoneDragLeave}
-                      onDrop={handleZoneDrop}
+                      onDrop={(e) => handleZoneDrop(e, 'main-bottom')}
                       className={`grid grid-cols-12 gap-4 p-2 rounded-xl transition-all duration-200 border-2 ${
                         isEditingLayout
-                          ? activeDragOverZone === 'main-bottom'
+                          ? dragOverZone === 'main-bottom'
                             ? 'border-cyber-accent border-solid bg-cyber-accent/10 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
                             : 'border-dashed border-[var(--border-color)] bg-black/5'
                           : 'border-transparent'
@@ -426,7 +477,8 @@ const App: React.FC = () => {
                       }}
                     >
                       {mainBottomKeys.map(key => {
-                        const span = panelWidths[key] || 6;
+                        const isSingleInZone = mainBottomKeys.length === 1;
+                        const span = isSingleInZone ? 12 : (panelWidths[key] || 6);
                         const height = panelHeights[key];
                         return (
                           <div

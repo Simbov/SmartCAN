@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createCanopenNode, handleNmtCommand, generateHeartbeatFrame, handleSdoRequest } from './canopen';
+import { createCanopenNode, handleNmtCommand, generateHeartbeatFrame, handleSdoRequest, parseCanopenId, parseCanopenSdo } from './canopen';
 
 describe('CANopen Protocol Engine', () => {
   it('should transition NMT state on master commands', () => {
@@ -81,5 +81,38 @@ describe('CANopen Protocol Engine', () => {
     expect(entry).toBeDefined();
     expect(entry[0]).toBe(0xF4);
     expect(entry[1]).toBe(0x01);
+  });
+
+  it('should parse CANopen COB-IDs correctly', () => {
+    const sdoTx = parseCanopenId(0x581);
+    expect(sdoTx.functionCode).toBe(11);
+    expect(sdoTx.nodeId).toBe(1);
+    expect(sdoTx.interpretation).toBe('SDO Tx (Response)');
+
+    const sdoRx = parseCanopenId(0x60A);
+    expect(sdoRx.functionCode).toBe(12);
+    expect(sdoRx.nodeId).toBe(10);
+    expect(sdoRx.interpretation).toBe('SDO Rx (Request)');
+
+    const heartbeat = parseCanopenId(0x705);
+    expect(heartbeat.functionCode).toBe(14);
+    expect(heartbeat.nodeId).toBe(5);
+    expect(heartbeat.interpretation).toBe('Heartbeat/Boot-up');
+
+    const sync = parseCanopenId(0x080);
+    expect(sync.functionCode).toBe(1);
+    expect(sync.nodeId).toBe(0);
+    expect(sync.interpretation).toBe('SYNC');
+  });
+
+  it('should parse CANopen SDO payload correctly', () => {
+    const payload = new Uint8Array([0x40, 0x17, 0x10, 0x00, 0, 0, 0, 0]); // Index 0x1017, subindex 0x00
+    const sdo = parseCanopenSdo(payload);
+    expect(sdo).not.toBeNull();
+    expect(sdo?.index).toBe(0x1017);
+    expect(sdo?.subIndex).toBe(0);
+
+    const emptyPayload = new Uint8Array([0x40]);
+    expect(parseCanopenSdo(emptyPayload)).toBeNull();
   });
 });

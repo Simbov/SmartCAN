@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Graphical DBC Builder & Editor**: Graphical nodes, messages, and signals CRUD panel inside the DBC Manager with automatic Vector DBC serialization.
+- **Advanced CAN Traffic Filtering & Heatmap**:
+  - Expandable filter options supporting DBC match status (Known vs Unrecognized), CAN ID ranges (Hex and Dec), bitmasks, payload byte offset values, direction, and frame intervals.
+  - Visual payload byte change heatmap flashing cyan on value shifts with a 1.5s fade-out ticker.
+  - Row expansion panel with a 64-bit binary matrix and detailed byte analysis (min/max ranges, value change count, ASCII, and decimal conversions).
+- **CANopen Decoding Columns & SDO Inspector**:
+  - Displays CANopen Function Code and Node ID columns dynamically based on active protocol.
+  - Decodes and displays SDO Index and Sub-index columns for SDO request/response traffic.
+  - Built-in Object Dictionary lookup mapping common indices to standard names inside a CANopen Protocol Inspector details card.
+
 ## [0.0.3] - 2026-06-04
 
 ### Added

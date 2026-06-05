@@ -28,7 +28,7 @@ export const Header: React.FC = () => {
 
 
   return (
-    <header className="h-16 border-b border-cyber-border bg-black/10 backdrop-blur-md px-6 flex items-center justify-between z-50 select-none">
+    <header className="h-16 border-b border-[var(--border-color)] bg-black/10 backdrop-blur-md px-6 flex items-center justify-between z-50 select-none">
       {/* Title */}
       <div className="flex items-center gap-3">
         <Cpu className={`w-6 h-6 ${

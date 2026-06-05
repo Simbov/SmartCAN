@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseDbc, decodeFrame, encodeFrame } from './dbcParser';
+import { serializeDbc } from './dbcSerializer';
 
 const MOCK_DBC = `
 BU_: Engine Dashboard
@@ -135,5 +136,40 @@ BO_ 600 SignedTest: 8 Motor
     const encoded = encodeFrame(600, { SignedIntel: -50, SignedMotorola: 75 }, db);
     expect(encoded?.[0]).toBe(0xCE);
     expect(encoded?.[1]).toBe(0x4B);
+  });
+
+  it('should support serializing parsed databases back to Vector DBC strings and round-trip correctly', () => {
+    const originalDb = parseDbc(MOCK_DBC);
+    
+    // Serialize back to raw text
+    const serialized = serializeDbc(originalDb);
+    
+    // Re-parse the serialized content
+    const reparsedDb = parseDbc(serialized);
+    
+    // Validate nodes match
+    expect(reparsedDb.nodes).toEqual(originalDb.nodes);
+    
+    // Validate messages and signals match structurally
+    expect(Object.keys(reparsedDb.messages).length).toBe(Object.keys(originalDb.messages).length);
+    
+    const origEEC1 = originalDb.messages[2364539904];
+    const repEEC1 = reparsedDb.messages[2364539904];
+    expect(repEEC1).toBeDefined();
+    expect(repEEC1.name).toBe(origEEC1.name);
+    expect(repEEC1.dlc).toBe(origEEC1.dlc);
+    expect(repEEC1.sender).toBe(origEEC1.sender);
+    
+    expect(repEEC1.signals.length).toBe(origEEC1.signals.length);
+    const origSpeedSig = origEEC1.signals.find(s => s.name === 'EngineSpeed');
+    const repSpeedSig = repEEC1.signals.find(s => s.name === 'EngineSpeed');
+    expect(repSpeedSig).toBeDefined();
+    expect(repSpeedSig?.startBit).toBe(origSpeedSig?.startBit);
+    expect(repSpeedSig?.length).toBe(origSpeedSig?.length);
+    expect(repSpeedSig?.factor).toBe(origSpeedSig?.factor);
+    expect(repSpeedSig?.offset).toBe(origSpeedSig?.offset);
+    expect(repSpeedSig?.min).toBe(origSpeedSig?.min);
+    expect(repSpeedSig?.max).toBe(origSpeedSig?.max);
+    expect(repSpeedSig?.unit).toBe(origSpeedSig?.unit);
   });
 });

@@ -5,6 +5,7 @@ import { createCanopenNode, handleNmtCommand, handleSdoRequest, generateHeartbea
 import type { CanopenNode } from '../lib/canopen';
 import { parseJ1939Id, buildJ1939Id, J1939TpReassembler } from '../lib/j1939';
 import { isTauriEnv } from '../lib/tauriAdapter';
+import { BUILT_IN_DBCS } from '../lib/builtInDbcs';
 
 // Default Mock DBC for J1939
 const DEFAULT_J1939_DBC = `
@@ -23,18 +24,7 @@ BO_ 2364539905 TC1: 8 Transmission
  SG_ TransmissionActualGear : 4|4@1+ (1,-125) [-125|125] "" InstrumentPanel
 `;
 
-// Default Mock DBC for CANopen
-const DEFAULT_CANOPEN_DBC = `
-BU_: Master Node1 Node2
-BO_ 385 TxPDO1_Node1: 8 Node1
- SG_ DigitalInputs : 0|8@1+ (1,0) [0|255] "" Master
- SG_ AnalogInput1 : 8|16@1+ (0.001,0) [0|10] "V" Master
- SG_ AnalogInput2 : 24|16@1+ (0.001,0) [0|10] "V" Master
 
-BO_ 513 RxPDO1_Node1: 8 Master
- SG_ DigitalOutputs : 0|8@1+ (1,0) [0|255] "" Node1
- SG_ AnalogOutput1 : 8|16@1+ (0.001,0) [0|10] "V" Node1
-`;
 
 export interface CanDevice {
   id: string;
@@ -61,6 +51,10 @@ export interface CanLog {
   data: Uint8Array;
   delta: number; // ms since previous frame of same ID
   decodedSignals: Record<string, number> | null;
+  byteChanges?: number[];
+  lastChangedTimes?: number[];
+  minValues?: number[];
+  maxValues?: number[];
 }
 
 export interface PlotPoint {
@@ -70,6 +64,25 @@ export interface PlotPoint {
 
 export interface ProjectSettings {
   name: string;
+  disabledMessageIds: Record<number, boolean>;
+  messageNameOverrides: Record<number, string>;
+}
+
+export interface DbcRegistryEntry {
+  name: string;
+  content: string;
+  type: 'generic' | 'device' | 'custom';
+  enabled: boolean;
+}
+
+export interface SmartCanProject {
+  id: string;
+  name: string;
+  protocol: 'canopen' | 'j1939';
+  baudRate: number;
+  enabled: boolean;
+  enabledDbcNames: string[];
+  devices: CanDevice[];
   disabledMessageIds: Record<number, boolean>;
   messageNameOverrides: Record<number, string>;
 }
@@ -92,6 +105,8 @@ interface CanStore {
   panelHeights: Record<string, number>;
   panelOrder: string[];
   activeDragKey: string | null;
+  dragOverTargetKey: string | null;
+  dragOverZone: 'sidebar' | 'main-top' | 'main-bottom' | null;
   
   // DBC Databases
   dbcs: Record<string, DbcDatabase>;
@@ -100,9 +115,13 @@ interface CanStore {
   // Network Topologies & Project Configuration
   devices: CanDevice[];
   projectSettings: ProjectSettings;
+  projects: SmartCanProject[];
+  activeProjectId: string;
+  dbcRegistry: DbcRegistryEntry[];
   
   // Traffic Log
   logs: CanLog[];
+  fixedLogs: Record<number, CanLog>;
   pausedLogs: boolean;
   
   // Realtime Plotting
@@ -130,8 +149,23 @@ interface CanStore {
   setPanelHeight: (panelName: string, height: number) => void;
   setPanelOrder: (order: string[]) => void;
   setActiveDragKey: (key: string | null) => void;
+  setDragOverTargetKey: (key: string | null) => void;
+  setDragOverZone: (zone: 'sidebar' | 'main-top' | 'main-bottom' | null) => void;
   loadDbcFile: (name: string, content: string) => void;
   unloadDbc: () => void;
+  
+  // Project Management Actions
+  addProject: (name: string) => void;
+  setActiveProject: (id: string) => void;
+  deleteProject: (id: string) => void;
+  toggleDbcInProject: (dbcName: string) => void;
+  importDbcToProject: (name: string, content: string) => void;
+  removeDbcFromProject: (name: string) => void;
+  updateDbc: (oldName: string, newName: string, content: string) => void;
+  createEmptyDbc: (name: string) => void;
+  restoreDefaultDbcs: () => void;
+  saveSmartCanFile: () => void;
+  loadSmartCanFile: (jsonContent: string) => void;
   
   // Device actions
   addDevice: (device: Omit<CanDevice, 'customMessages'>) => void;
@@ -169,7 +203,6 @@ interface CanStore {
 }
 
 const defaultDbcJ1939 = parseDbc(DEFAULT_J1939_DBC);
-const defaultDbcCanopen = parseDbc(DEFAULT_CANOPEN_DBC);
 
 // Keep a local reference for the tauri listener unlisten promise
 let kvaserUnlisten: (() => void) | null = null;
@@ -177,6 +210,42 @@ let kvaserUnlisten: (() => void) | null = null;
 export const useStore = create<CanStore>((set, get) => {
   // Keep track of last timestamps per ID for delta calculations
   const lastTimestampsById: Record<number, number> = {};
+
+  const syncStoreState = (state: CanStore) => {
+    const activeProj = state.projects.find((p) => p.id === state.activeProjectId);
+    if (!activeProj) return {};
+
+    // Keep active project fields synced with root
+    activeProj.protocol = state.protocol;
+    activeProj.baudRate = state.baudRate;
+    activeProj.devices = state.devices;
+    activeProj.disabledMessageIds = state.projectSettings.disabledMessageIds;
+    activeProj.messageNameOverrides = state.projectSettings.messageNameOverrides;
+
+    // Update dbcRegistry entry.enabled flags based on activeProj.enabledDbcNames
+    const updatedRegistry = state.dbcRegistry.map((entry) => ({
+      ...entry,
+      enabled: activeProj.enabledDbcNames.includes(entry.name)
+    }));
+
+    // Parse enabled DBCs and put them in state.dbcs
+    const parsedDbcs: Record<string, DbcDatabase> = {};
+    updatedRegistry.forEach((entry) => {
+      if (entry.enabled) {
+        try {
+          parsedDbcs[entry.name] = parseDbc(entry.content);
+        } catch (e) {
+          console.error('Failed to parse enabled DBC:', entry.name, e);
+        }
+      }
+    });
+
+    return {
+      projects: [...state.projects],
+      dbcRegistry: updatedRegistry,
+      dbcs: parsedDbcs
+    };
+  };
 
   return {
     // Initial State
@@ -186,15 +255,15 @@ export const useStore = create<CanStore>((set, get) => {
     kvaserStatus: 'offline',
     kvaserDeviceName: null,
     connectionError: null,
-    theme: 'dark',
+    theme: 'light',
     visiblePanels: {
-      deviceManager: true,
-      dbcManager: true,
+      deviceManager: false,
+      dbcManager: false,
       liveViewer: true,
-      livePlotter: true,
-      transmitter: true,
-      diagnostics: true,
-      falseSender: true
+      livePlotter: false,
+      transmitter: false,
+      diagnostics: false,
+      falseSender: false
     },
     panelPositions: {
       deviceManager: 'sidebar',
@@ -234,9 +303,10 @@ export const useStore = create<CanStore>((set, get) => {
       'falseSender'
     ],
     activeDragKey: null,
+    dragOverTargetKey: null,
+    dragOverZone: null,
     dbcs: {
-      'Default J1939 Database': defaultDbcJ1939,
-      'Default CANopen Database': defaultDbcCanopen
+      'Default J1939 Database': defaultDbcJ1939
     },
     activeDbcName: 'Default J1939 Database',
     devices: [
@@ -258,11 +328,49 @@ export const useStore = create<CanStore>((set, get) => {
       }
     ],
     projectSettings: {
-      name: 'SmartCAN Project',
+      name: 'Default Project',
       disabledMessageIds: {},
       messageNameOverrides: {}
     },
+    projects: [
+      {
+        id: 'proj-default',
+        name: 'Default Project',
+        protocol: 'j1939',
+        baudRate: 250000,
+        enabled: true,
+        enabledDbcNames: ['Default J1939 Database'],
+        devices: [
+          {
+            id: 'dev-1',
+            name: 'Engine Controller',
+            nodeId: 0x01,
+            enabled: true,
+            isSimulated: true,
+            customMessages: []
+          },
+          {
+            id: 'dev-2',
+            name: 'Transmission Controller',
+            nodeId: 0x03,
+            enabled: true,
+            isSimulated: true,
+            customMessages: []
+          }
+        ],
+        disabledMessageIds: {},
+        messageNameOverrides: {}
+      }
+    ],
+    activeProjectId: 'proj-default',
+    dbcRegistry: BUILT_IN_DBCS.map(db => ({
+      name: db.name,
+      content: db.content,
+      type: db.category === 'generic' ? 'generic' as const : 'device' as const,
+      enabled: db.name === 'Default J1939 Database'
+    })),
     logs: [],
+    fixedLogs: {},
     pausedLogs: false,
     plotSignals: [],
     plotPoints: [],
@@ -299,22 +407,44 @@ export const useStore = create<CanStore>((set, get) => {
         state.stopSimulation();
       }
 
-      set({
-        protocol: proto,
-        activeDbcName: activeDbc,
-        devices: defaultDevices,
-        logs: [],
-        plotPoints: [],
-        plotSignals: [],
-        simTime: 0,
-        canopenNodes: proto === 'canopen' ? {
-          1: createCanopenNode(1),
-          2: createCanopenNode(2)
-        } : {}
+      set(state => {
+        const nextState = {
+          ...state,
+          protocol: proto,
+          activeDbcName: activeDbc,
+          devices: defaultDevices,
+          logs: [],
+          fixedLogs: {},
+          plotPoints: [],
+          plotSignals: [],
+          simTime: 0,
+          canopenNodes: proto === 'canopen' ? {
+            1: createCanopenNode(1),
+            2: createCanopenNode(2)
+          } : ({} as Record<number, CanopenNode>)
+        };
+
+        const activeProj = nextState.projects.find(p => p.id === nextState.activeProjectId);
+        if (activeProj) {
+          activeProj.protocol = proto;
+          activeProj.devices = defaultDevices;
+          activeProj.enabledDbcNames = [activeDbc];
+        }
+
+        return {
+          ...nextState,
+          ...syncStoreState(nextState)
+        };
       });
     },
 
-    setBaudRate: (baudRate) => set({ baudRate }),
+    setBaudRate: (baudRate) => set(state => {
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      if (activeProj) {
+        activeProj.baudRate = baudRate;
+      }
+      return { baudRate, projects: [...state.projects] };
+    }),
 
     toggleTheme: () => set(state => {
       const nextTheme = state.theme === 'dark' ? 'light' : 'dark';
@@ -360,6 +490,8 @@ export const useStore = create<CanStore>((set, get) => {
 
     setPanelOrder: (panelOrder) => set({ panelOrder }),
     setActiveDragKey: (activeDragKey) => set({ activeDragKey }),
+    setDragOverTargetKey: (dragOverTargetKey) => set({ dragOverTargetKey }),
+    setDragOverZone: (dragOverZone) => set({ dragOverZone }),
 
     setConnected: async (isConnected) => {
       const state = get();
@@ -460,86 +592,501 @@ export const useStore = create<CanStore>((set, get) => {
     },
 
     loadDbcFile: (name, content) => {
-      try {
-        const parsed = parseDbc(content);
-        set(state => ({
-          dbcs: {
-            ...state.dbcs,
-            [name]: parsed
-          },
-          activeDbcName: name
-        }));
-      } catch (err) {
-        console.error('Error loading DBC file:', err);
-        alert('Could not parse DBC file. Please ensure it follows Vector DBC formats.');
-      }
+      get().importDbcToProject(name, content);
     },
 
     unloadDbc: () => {
-      set(state => {
-        const nextDbcs = { ...state.dbcs };
-        delete nextDbcs[state.activeDbcName];
-        return {
-          dbcs: nextDbcs,
-          activeDbcName: Object.keys(nextDbcs)[0] || ''
+      get().removeDbcFromProject(get().activeDbcName);
+    },
+
+    addProject: (name) => set(state => {
+      const id = 'proj-' + Math.random().toString(36).substr(2, 9);
+      const newProj: SmartCanProject = {
+        id,
+        name,
+        protocol: state.protocol,
+        baudRate: state.baudRate,
+        enabled: true,
+        enabledDbcNames: state.protocol === 'j1939' ? ['Default J1939 Database'] : ['Default CANopen Database'],
+        devices: state.devices.map(d => ({ ...d })),
+        disabledMessageIds: { ...state.projectSettings.disabledMessageIds },
+        messageNameOverrides: { ...state.projectSettings.messageNameOverrides }
+      };
+
+      const nextState = {
+        ...state,
+        projects: [...state.projects, newProj],
+        activeProjectId: id,
+        projectSettings: {
+          name: newProj.name,
+          disabledMessageIds: newProj.disabledMessageIds,
+          messageNameOverrides: newProj.messageNameOverrides
+        }
+      };
+
+      return {
+        ...nextState,
+        ...syncStoreState(nextState)
+      };
+    }),
+
+    setActiveProject: (id) => set(state => {
+      const targetProj = state.projects.find(p => p.id === id);
+      if (!targetProj) return {};
+
+      const nextState = {
+        ...state,
+        activeProjectId: id,
+        protocol: targetProj.protocol,
+        baudRate: targetProj.baudRate,
+        devices: targetProj.devices,
+        projectSettings: {
+          name: targetProj.name,
+          disabledMessageIds: targetProj.disabledMessageIds,
+          messageNameOverrides: targetProj.messageNameOverrides
+        }
+      };
+
+      return {
+        ...nextState,
+        ...syncStoreState(nextState)
+      };
+    }),
+
+    deleteProject: (id) => set(state => {
+      if (state.projects.length <= 1) {
+        alert("Cannot delete the last remaining project.");
+        return {};
+      }
+      const nextProjects = state.projects.filter(p => p.id !== id);
+      let nextState = { ...state, projects: nextProjects };
+
+      if (state.activeProjectId === id) {
+        const nextActiveId = nextProjects[0].id;
+        const targetProj = nextProjects[0];
+        nextState = {
+          ...nextState,
+          activeProjectId: nextActiveId,
+          protocol: targetProj.protocol,
+          baudRate: targetProj.baudRate,
+          devices: targetProj.devices,
+          projectSettings: {
+            name: targetProj.name,
+            disabledMessageIds: targetProj.disabledMessageIds,
+            messageNameOverrides: targetProj.messageNameOverrides
+          }
         };
+      }
+
+      return {
+        ...nextState,
+        ...syncStoreState(nextState)
+      };
+    }),
+
+    toggleDbcInProject: (dbcName) => set(state => {
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      if (!activeProj) return {};
+
+      const isEnabled = activeProj.enabledDbcNames.includes(dbcName);
+      const nextEnabledDbcNames = isEnabled
+        ? activeProj.enabledDbcNames.filter(name => name !== dbcName)
+        : [...activeProj.enabledDbcNames, dbcName];
+
+      activeProj.enabledDbcNames = nextEnabledDbcNames;
+
+      const nextState = { ...state };
+      return {
+        ...nextState,
+        ...syncStoreState(nextState)
+      };
+    }),
+
+    importDbcToProject: (name, content) => set(state => {
+      try {
+        parseDbc(content);
+      } catch (err) {
+        console.error('Error loading DBC file:', err);
+        alert('Could not parse DBC file. Please ensure it follows Vector DBC formats.');
+        return {};
+      }
+
+      const exists = state.dbcRegistry.some(entry => entry.name === name);
+      const updatedRegistry = exists
+        ? state.dbcRegistry.map(entry => entry.name === name ? { ...entry, content, type: 'custom' as const } : entry)
+        : [...state.dbcRegistry, { name, content, type: 'custom' as const, enabled: true }];
+
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      if (activeProj && !activeProj.enabledDbcNames.includes(name)) {
+        activeProj.enabledDbcNames = [...activeProj.enabledDbcNames, name];
+      }
+
+      const nextState = {
+        ...state,
+        dbcRegistry: updatedRegistry,
+        activeDbcName: name
+      };
+
+      return {
+        ...nextState,
+        ...syncStoreState(nextState)
+      };
+    }),
+
+    removeDbcFromProject: (name) => set(state => {
+      const updatedRegistry = state.dbcRegistry.filter(entry => entry.name !== name);
+      state.projects.forEach(proj => {
+        proj.enabledDbcNames = proj.enabledDbcNames.filter(n => n !== name);
       });
+
+      const nextActiveDbcName = state.activeDbcName === name
+        ? (Object.keys(state.dbcs).filter(n => n !== name)[0] || '')
+        : state.activeDbcName;
+
+      const nextState = {
+        ...state,
+        dbcRegistry: updatedRegistry,
+        activeDbcName: nextActiveDbcName
+      };
+
+      return {
+        ...nextState,
+        ...syncStoreState(nextState)
+      };
+    }),
+
+    updateDbc: (oldName, newName, content) => set(state => {
+      try {
+        parseDbc(content);
+      } catch (err) {
+        console.error('Failed to parse DBC:', err);
+        alert(`Failed to parse DBC syntax: ${(err as Error).message}`);
+        return {};
+      }
+
+      const trimmedNewName = newName.trim();
+      if (!trimmedNewName) {
+        alert('DBC database name cannot be empty.');
+        return {};
+      }
+      if (trimmedNewName !== oldName && state.dbcRegistry.some(entry => entry.name === trimmedNewName)) {
+        alert(`A DBC database named "${trimmedNewName}" already exists.`);
+        return {};
+      }
+
+      const updatedRegistry = state.dbcRegistry.map(entry => {
+        if (entry.name === oldName) {
+          return {
+            ...entry,
+            name: trimmedNewName,
+            content
+          };
+        }
+        return entry;
+      });
+
+      state.projects.forEach(proj => {
+        proj.enabledDbcNames = proj.enabledDbcNames.map(n => n === oldName ? trimmedNewName : n);
+      });
+
+      let nextActiveDbcName = state.activeDbcName;
+      if (state.activeDbcName === oldName) {
+        nextActiveDbcName = trimmedNewName;
+      }
+
+      const nextState = {
+        ...state,
+        dbcRegistry: updatedRegistry,
+        activeDbcName: nextActiveDbcName
+      };
+
+      return {
+        ...nextState,
+        ...syncStoreState(nextState)
+      };
+    }),
+
+    createEmptyDbc: (name) => set(state => {
+      const trimmed = name.trim();
+      if (!trimmed) {
+        alert('DBC database name cannot be empty.');
+        return {};
+      }
+      if (state.dbcRegistry.some(entry => entry.name === trimmed)) {
+        alert(`A DBC database named "${trimmed}" already exists.`);
+        return {};
+      }
+
+      const newEntry = {
+        name: trimmed,
+        content: `BU_: Master Node\n`,
+        type: 'custom' as const,
+        enabled: true
+      };
+
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      if (activeProj) {
+        activeProj.enabledDbcNames = [...activeProj.enabledDbcNames, trimmed];
+      }
+
+      const nextState = {
+        ...state,
+        dbcRegistry: [...state.dbcRegistry, newEntry],
+        activeDbcName: trimmed
+      };
+
+      return {
+        ...nextState,
+        ...syncStoreState(nextState)
+      };
+    }),
+
+    restoreDefaultDbcs: () => set(state => {
+      const baseRegistry = BUILT_IN_DBCS.map(db => ({
+        name: db.name,
+        content: db.content,
+        type: db.category === 'generic' ? 'generic' as const : 'device' as const,
+        enabled: false
+      }));
+
+      // Retain custom DBCs
+      const customDbcs = state.dbcRegistry.filter(entry => entry.type === 'custom');
+      const nextRegistry = [...baseRegistry, ...customDbcs];
+
+      // Re-enable J1939 or CANopen defaults if they were removed
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      if (activeProj) {
+        const defaultDbc = state.protocol === 'j1939' ? 'Default J1939 Database' : 'Default CANopen Database';
+        if (!activeProj.enabledDbcNames.includes(defaultDbc)) {
+          activeProj.enabledDbcNames.push(defaultDbc);
+        }
+      }
+
+      const nextState = {
+        ...state,
+        dbcRegistry: nextRegistry
+      };
+
+      return {
+        ...nextState,
+        ...syncStoreState(nextState)
+      };
+    }),
+
+    saveSmartCanFile: () => {
+      const state = get();
+      const customDbcs = state.dbcRegistry
+        .filter(entry => entry.type === 'custom')
+        .map(entry => ({ name: entry.name, content: entry.content }));
+
+      const payload = {
+        version: 1,
+        activeProjectId: state.activeProjectId,
+        projects: state.projects.map(proj => {
+          if (proj.id === state.activeProjectId) {
+            return {
+              ...proj,
+              protocol: state.protocol,
+              baudRate: state.baudRate,
+              devices: state.devices,
+              disabledMessageIds: state.projectSettings.disabledMessageIds,
+              messageNameOverrides: state.projectSettings.messageNameOverrides
+            };
+          }
+          return proj;
+        }),
+        customDbcs
+      };
+
+      const json = JSON.stringify(payload, null, 2);
+      if (typeof document !== 'undefined') {
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${state.projectSettings.name.replace(/\s+/g, '_')}.smartcan`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    },
+
+    loadSmartCanFile: (jsonContent) => {
+      try {
+        const parsed = JSON.parse(jsonContent);
+        if (!parsed || typeof parsed !== 'object') {
+          throw new Error('Invalid JSON format');
+        }
+        if (!Array.isArray(parsed.projects) || parsed.projects.length === 0) {
+          throw new Error('No projects found in file');
+        }
+
+        const baseRegistry = BUILT_IN_DBCS.map(db => ({
+          name: db.name,
+          content: db.content,
+          type: db.category === 'generic' ? 'generic' as const : 'device' as const,
+          enabled: false
+        }));
+
+        const fileCustomDbcs = Array.isArray(parsed.customDbcs) ? parsed.customDbcs : [];
+        const restoredRegistry = [
+          ...baseRegistry,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ...fileCustomDbcs.map((db: any) => ({
+            name: db.name,
+            content: db.content,
+            type: 'custom' as const,
+            enabled: false
+          }))
+        ];
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const restoredProjects: SmartCanProject[] = parsed.projects.map((proj: any) => ({
+          id: proj.id || 'proj-' + Math.random().toString(36).substr(2, 9),
+          name: proj.name || 'Unnamed Project',
+          protocol: proj.protocol === 'canopen' ? 'canopen' : 'j1939',
+          baudRate: Number(proj.baudRate) || 250000,
+          enabled: proj.enabled !== false,
+          enabledDbcNames: Array.isArray(proj.enabledDbcNames) ? proj.enabledDbcNames : [],
+          devices: Array.isArray(proj.devices) ? proj.devices : [],
+          disabledMessageIds: proj.disabledMessageIds || {},
+          messageNameOverrides: proj.messageNameOverrides || {}
+        }));
+
+        const nextActiveId = parsed.activeProjectId && restoredProjects.some(p => p.id === parsed.activeProjectId)
+          ? parsed.activeProjectId
+          : restoredProjects[0].id;
+
+        const activeProj = restoredProjects.find(p => p.id === nextActiveId)!;
+        const state = get();
+        if (state.isSimulating) {
+          state.stopSimulation();
+        }
+
+        const nextState = {
+          ...state,
+          projects: restoredProjects,
+          activeProjectId: nextActiveId,
+          dbcRegistry: restoredRegistry,
+          protocol: activeProj.protocol,
+          baudRate: activeProj.baudRate,
+          devices: activeProj.devices,
+          projectSettings: {
+            name: activeProj.name,
+            disabledMessageIds: activeProj.disabledMessageIds,
+            messageNameOverrides: activeProj.messageNameOverrides
+          },
+          logs: [],
+          fixedLogs: {},
+          plotPoints: [],
+          plotSignals: []
+        };
+
+        set({
+          ...nextState,
+          ...syncStoreState(nextState)
+        });
+      } catch (err) {
+        console.error('Failed to load .smartcan file:', err);
+        alert(`Failed to load .smartcan file: ${(err as Error).message}`);
+      }
     },
 
     // Devices Actions
-    addDevice: (device) => set(state => ({
-      devices: [...state.devices, { ...device, customMessages: [] }]
-    })),
+    addDevice: (device) => set(state => {
+      const nextDevices = [...state.devices, { ...device, customMessages: [] }];
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      if (activeProj) {
+        activeProj.devices = nextDevices;
+      }
+      return { devices: nextDevices, projects: [...state.projects] };
+    }),
 
-    updateDevice: (deviceId, updates) => set(state => ({
-      devices: state.devices.map(d => d.id === deviceId ? { ...d, ...updates } : d)
-    })),
+    updateDevice: (deviceId, updates) => set(state => {
+      const nextDevices = state.devices.map(d => d.id === deviceId ? { ...d, ...updates } : d);
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      if (activeProj) {
+        activeProj.devices = nextDevices;
+      }
+      return { devices: nextDevices, projects: [...state.projects] };
+    }),
 
-    removeDevice: (deviceId) => set(state => ({
-      devices: state.devices.filter(d => d.id !== deviceId)
-    })),
+    removeDevice: (deviceId) => set(state => {
+      const nextDevices = state.devices.filter(d => d.id !== deviceId);
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      if (activeProj) {
+        activeProj.devices = nextDevices;
+      }
+      return { devices: nextDevices, projects: [...state.projects] };
+    }),
 
-    addCustomMessage: (deviceId, message) => set(state => ({
-      devices: state.devices.map(d => d.id === deviceId 
+    addCustomMessage: (deviceId, message) => set(state => {
+      const nextDevices = state.devices.map(d => d.id === deviceId 
         ? { ...d, customMessages: [...d.customMessages, message] } 
-        : d)
-    })),
+        : d);
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      if (activeProj) {
+        activeProj.devices = nextDevices;
+      }
+      return { devices: nextDevices, projects: [...state.projects] };
+    }),
 
-    updateCustomMessage: (deviceId, messageId, updates) => set(state => ({
-      devices: state.devices.map(d => d.id === deviceId 
+    updateCustomMessage: (deviceId, messageId, updates) => set(state => {
+      const nextDevices = state.devices.map(d => d.id === deviceId 
         ? { 
             ...d, 
             customMessages: d.customMessages.map(m => m.id === messageId ? { ...m, ...updates } : m) 
           } 
-        : d)
-    })),
+        : d);
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      if (activeProj) {
+        activeProj.devices = nextDevices;
+      }
+      return { devices: nextDevices, projects: [...state.projects] };
+    }),
 
-    removeCustomMessage: (deviceId, messageId) => set(state => ({
-      devices: state.devices.map(d => d.id === deviceId 
+    removeCustomMessage: (deviceId, messageId) => set(state => {
+      const nextDevices = state.devices.map(d => d.id === deviceId 
         ? { ...d, customMessages: d.customMessages.filter(m => m.id !== messageId) } 
-        : d)
-    })),
+        : d);
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      if (activeProj) {
+        activeProj.devices = nextDevices;
+      }
+      return { devices: nextDevices, projects: [...state.projects] };
+    }),
 
     // Project Settings
     toggleMessageDisabledInProject: (id) => set(state => {
       const disabled = { ...state.projectSettings.disabledMessageIds };
       disabled[id] = !disabled[id];
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      if (activeProj) {
+        activeProj.disabledMessageIds = disabled;
+      }
       return {
         projectSettings: {
           ...state.projectSettings,
           disabledMessageIds: disabled
-        }
+        },
+        projects: [...state.projects]
       };
     }),
 
     setMessageNameOverride: (id, name) => set(state => {
       const overrides = { ...state.projectSettings.messageNameOverrides };
       overrides[id] = name;
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      if (activeProj) {
+        activeProj.messageNameOverrides = overrides;
+      }
       return {
         projectSettings: {
           ...state.projectSettings,
           messageNameOverrides: overrides
-        }
+        },
+        projects: [...state.projects]
       };
     }),
 
@@ -561,58 +1108,72 @@ export const useStore = create<CanStore>((set, get) => {
       let decodedSignals: Record<string, number> | null = null;
       let msgName = state.projectSettings.messageNameOverrides[frame.id] || '';
 
-      const activeDbc = state.dbcs[state.activeDbcName];
-      if (activeDbc) {
-        // Try decoding
-        // In J1939, DBC ID contains PGN details. Let's match J1939 messages.
+      // Try decoding across ALL enabled DBCs
+      for (const parsedDbc of Object.values(state.dbcs)) {
         if (state.protocol === 'j1939') {
           const frameDetails = parseJ1939Id(frame.id);
           // Find matching BO_ message by matching PGN
-          const matchedMessage = Object.values(activeDbc.messages).find(msg => {
+          const matchedMessage = Object.values(parsedDbc.messages).find(msg => {
             const dbMsgDetails = parseJ1939Id(msg.id);
             return dbMsgDetails.pgn === frameDetails.pgn;
           });
           
           if (matchedMessage) {
-            msgName = matchedMessage.name;
-            decodedSignals = decodeFrame(matchedMessage.id, frame.data, activeDbc);
-          } else {
-            // Default protocol identification
-            msgName = `PGN ${frameDetails.pgn.toString(16).toUpperCase()} (SA:${frameDetails.sa})`;
+            if (!msgName) {
+              msgName = matchedMessage.name;
+            }
+            const signals = decodeFrame(matchedMessage.id, frame.data, parsedDbc);
+            if (signals) {
+              decodedSignals = { ...(decodedSignals || {}), ...signals };
+            }
           }
-
-          // Handle transport protocol reassembly in reassembler
-          const assembled = state.tpReassembler.processFrame(frame.id, frame.data, frame.timestamp);
-          if (assembled) {
-            const longId = buildJ1939Id(7, assembled.pgn, assembled.sa, 255);
-            
-            setTimeout(() => {
-              state.addLog({
-                timestamp: frame.timestamp,
-                direction: 'RX',
-                id: longId,
-                dlc: assembled.payload.length,
-                data: assembled.payload
-              });
-            }, 0);
-          }
-
         } else {
           // CANopen ID direct matching
-          const matchedMessage = activeDbc.messages[frame.id];
+          const matchedMessage = parsedDbc.messages[frame.id];
           if (matchedMessage) {
-            msgName = matchedMessage.name;
-            decodedSignals = decodeFrame(frame.id, frame.data, activeDbc);
-          } else {
-            // Decode protocol names (e.g. heartbeat, sdo)
-            const type = frame.id & 0x780;
-            const nid = frame.id & 0x07F;
-            if (type === 0x700) msgName = `Heartbeat Node ${nid}`;
-            else if (type === 0x600) msgName = `SDO Rx Node ${nid}`;
-            else if (type === 0x580) msgName = `SDO Tx Node ${nid}`;
-            else if (frame.id === 0x000) msgName = 'NMT Master Command';
-            else msgName = `COB-ID 0x${frame.id.toString(16).toUpperCase()}`;
+            if (!msgName) {
+              msgName = matchedMessage.name;
+            }
+            const signals = decodeFrame(frame.id, frame.data, parsedDbc);
+            if (signals) {
+              decodedSignals = { ...(decodedSignals || {}), ...signals };
+            }
           }
+        }
+      }
+
+      // Fallback naming if no DBC matched
+      if (!msgName) {
+        if (state.protocol === 'j1939') {
+          const frameDetails = parseJ1939Id(frame.id);
+          msgName = `PGN ${frameDetails.pgn.toString(16).toUpperCase()} (SA:${frameDetails.sa})`;
+        } else {
+          // Decode protocol names (e.g. heartbeat, sdo)
+          const type = frame.id & 0x780;
+          const nid = frame.id & 0x07F;
+          if (type === 0x700) msgName = `Heartbeat Node ${nid}`;
+          else if (type === 0x600) msgName = `SDO Rx Node ${nid}`;
+          else if (type === 0x580) msgName = `SDO Tx Node ${nid}`;
+          else if (frame.id === 0x000) msgName = 'NMT Master Command';
+          else msgName = `COB-ID 0x${frame.id.toString(16).toUpperCase()}`;
+        }
+      }
+
+      // Handle transport protocol reassembly in reassembler (J1939 only)
+      if (state.protocol === 'j1939') {
+        const assembled = state.tpReassembler.processFrame(frame.id, frame.data, frame.timestamp);
+        if (assembled) {
+          const longId = buildJ1939Id(7, assembled.pgn, assembled.sa, 255);
+          
+          setTimeout(() => {
+            state.addLog({
+              timestamp: frame.timestamp,
+              direction: 'RX',
+              id: longId,
+              dlc: assembled.payload.length,
+              data: assembled.payload
+            });
+          }, 0);
         }
       }
 
@@ -643,25 +1204,76 @@ export const useStore = create<CanStore>((set, get) => {
         }
       }
 
+      // Calculate byte-level changes and tracking (for heatmap/decoding)
+      const prevLog = state.fixedLogs[frame.id];
+      const len = Math.max(8, frame.data.length);
+      
+      const byteChanges = prevLog?.byteChanges 
+        ? [...prevLog.byteChanges] 
+        : Array(len).fill(0);
+      const lastChangedTimes = prevLog?.lastChangedTimes 
+        ? [...prevLog.lastChangedTimes] 
+        : Array(len).fill(0);
+      const minValues = prevLog?.minValues 
+        ? [...prevLog.minValues] 
+        : Array(len).fill(255);
+      const maxValues = prevLog?.maxValues 
+        ? [...prevLog.maxValues] 
+        : Array(len).fill(0);
+
+      // Ensure arrays are long enough if current frame data is larger
+      while (byteChanges.length < len) byteChanges.push(0);
+      while (lastChangedTimes.length < len) lastChangedTimes.push(0);
+      while (minValues.length < len) minValues.push(255);
+      while (maxValues.length < len) maxValues.push(0);
+
+      const now = Date.now();
+      for (let i = 0; i < len; i++) {
+        const val = i < frame.data.length ? frame.data[i] : 0;
+        if (!prevLog) {
+          minValues[i] = val;
+          maxValues[i] = val;
+          lastChangedTimes[i] = now;
+        } else {
+          const prevVal = i < prevLog.data.length ? prevLog.data[i] : 0;
+          if (val !== prevVal) {
+            byteChanges[i] = (byteChanges[i] || 0) + 1;
+            lastChangedTimes[i] = now;
+          }
+          if (val < minValues[i]) minValues[i] = val;
+          if (val > maxValues[i]) maxValues[i] = val;
+        }
+      }
+
       // Append CAN log
       const newLog: CanLog = {
         ...frame,
         name: msgName,
         delta,
-        decodedSignals
+        decodedSignals,
+        byteChanges,
+        lastChangedTimes,
+        minValues,
+        maxValues
       };
 
       set(state => {
         const nextLogs = [...state.logs, newLog];
         // Limit total log records to 1000 items
         if (nextLogs.length > 1000) nextLogs.shift();
-        return { logs: nextLogs };
+        
+        const nextFixedLogs = {
+          ...state.fixedLogs,
+          [newLog.id]: newLog
+        };
+        
+        return { logs: nextLogs, fixedLogs: nextFixedLogs };
       });
     },
 
     clearLogs: () => {
       Object.keys(lastTimestampsById).forEach(key => delete lastTimestampsById[Number(key)]);
-      set({ logs: [], plotPoints: [] });
+      set({ logs: [], fixedLogs: {}, plotPoints: [] });
     },
     
     setPausedLogs: (pausedLogs) => set({ pausedLogs }),
@@ -923,13 +1535,22 @@ export const useStore = create<CanStore>((set, get) => {
       const state = get();
       if (state.isSimulating) return;
 
-      const activeDbc = state.dbcs[state.activeDbcName];
       let t = 0;
 
       const intervalId = setInterval(() => {
         const currentState = useStore.getState();
         const nextTime = currentState.simTime + 50; // increment 50ms
         t += 0.05;
+
+        const encodeFromActiveDbcs = (msgId: number, signals: Record<string, number>) => {
+          for (const db of Object.values(currentState.dbcs)) {
+            if (db.messages[msgId]) {
+              const encoded = encodeFrame(msgId, signals, db);
+              if (encoded) return encoded;
+            }
+          }
+          return null;
+        };
 
         // 1. Generate Simulated Traffic for enabled simulated devices
         currentState.devices.forEach(device => {
@@ -949,20 +1570,16 @@ export const useStore = create<CanStore>((set, get) => {
                 AcceleratorPosition: accel
               };
 
-              // PGN 61444, BO_ ID is 2364539904 (EEC1)
-              const eec1Msg = activeDbc.messages[2364539904];
-              if (eec1Msg) {
-                const encoded = encodeFrame(2364539904, signals, activeDbc);
-                if (encoded) {
-                  const txId = buildJ1939Id(3, 0xF004, device.nodeId, 255);
-                  currentState.addLog({
-                    timestamp: nextTime,
-                    direction: 'RX',
-                    id: txId,
-                    dlc: encoded.length,
-                    data: encoded
-                  });
-                }
+              const encoded = encodeFromActiveDbcs(2364539904, signals);
+              if (encoded) {
+                const txId = buildJ1939Id(3, 0xF004, device.nodeId, 255);
+                currentState.addLog({
+                  timestamp: nextTime,
+                  direction: 'RX',
+                  id: txId,
+                  dlc: encoded.length,
+                  data: encoded
+                });
               }
             }
 
@@ -976,19 +1593,16 @@ export const useStore = create<CanStore>((set, get) => {
                 EngineOilTemp: oilTemp
               };
 
-              const et1Msg = activeDbc.messages[2364543488];
-              if (et1Msg) {
-                const encoded = encodeFrame(2364543488, signals, activeDbc);
-                if (encoded) {
-                  const txId = buildJ1939Id(6, 0xFEEE, device.nodeId, 255);
-                  currentState.addLog({
-                    timestamp: nextTime,
-                    direction: 'RX',
-                    id: txId,
-                    dlc: encoded.length,
-                    data: encoded
-                  });
-                }
+              const encoded = encodeFromActiveDbcs(2364543488, signals);
+              if (encoded) {
+                const txId = buildJ1939Id(6, 0xFEEE, device.nodeId, 255);
+                currentState.addLog({
+                  timestamp: nextTime,
+                  direction: 'RX',
+                  id: txId,
+                  dlc: encoded.length,
+                  data: encoded
+                });
               }
             }
 
@@ -1000,19 +1614,16 @@ export const useStore = create<CanStore>((set, get) => {
                 TransmissionActualGear: gear
               };
 
-              const tc1Msg = activeDbc.messages[2364539905];
-              if (tc1Msg) {
-                const encoded = encodeFrame(2364539905, signals, activeDbc);
-                if (encoded) {
-                  const txId = buildJ1939Id(3, 0xF005, device.nodeId, 255);
-                  currentState.addLog({
-                    timestamp: nextTime,
-                    direction: 'RX',
-                    id: txId,
-                    dlc: encoded.length,
-                    data: encoded
-                  });
-                }
+              const encoded = encodeFromActiveDbcs(2364539905, signals);
+              if (encoded) {
+                const txId = buildJ1939Id(3, 0xF005, device.nodeId, 255);
+                currentState.addLog({
+                  timestamp: nextTime,
+                  direction: 'RX',
+                  id: txId,
+                  dlc: encoded.length,
+                  data: encoded
+                });
               }
             }
 
@@ -1041,23 +1652,20 @@ export const useStore = create<CanStore>((set, get) => {
                 const analog1 = 2.4 + 1.2 * Math.sin(t * 2);
                 const analog2 = 5.0 + 0.5 * Math.cos(t);
 
-                const pdoMsg = activeDbc.messages[385];
-                if (pdoMsg) {
-                  const encoded = encodeFrame(385, {
-                    DigitalInputs: digital,
-                    AnalogInput1: analog1,
-                    AnalogInput2: analog2
-                  }, activeDbc);
+                const encoded = encodeFromActiveDbcs(385, {
+                  DigitalInputs: digital,
+                  AnalogInput1: analog1,
+                  AnalogInput2: analog2
+                });
 
-                  if (encoded) {
-                    currentState.addLog({
-                      timestamp: nextTime,
-                      direction: 'RX',
-                      id: 0x180 + device.nodeId,
-                      dlc: encoded.length,
-                      data: encoded
-                    });
-                  }
+                if (encoded) {
+                  currentState.addLog({
+                    timestamp: nextTime,
+                    direction: 'RX',
+                    id: 0x180 + device.nodeId,
+                    dlc: encoded.length,
+                    data: encoded
+                  });
                 }
               }
 
@@ -1099,3 +1707,13 @@ export const useStore = create<CanStore>((set, get) => {
     }
   };
 });
+
+declare global {
+  interface Window {
+    __store?: typeof useStore;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.__store = useStore;
+}
