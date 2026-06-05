@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Windows Startup Crash**: Added `"label": "main"` to the tauri window configuration to ensure compatibility with Tauri v2 capabilities.
+- **Robustness and Diagnostics**:
+  - Implemented a global panic hook writing detailed logs (`smartcan_crash.txt`) to the system `%TEMP%` and executable directories.
+  - Added native error dialogs on Windows via dynamic loading of `user32.dll` to prevent silent crashes and display detailed error reports.
+  - Refactored Tauri plugin registration directly onto the builder for cleaner initialization.
+
 ## [0.0.4] - 2026-06-05
 
 ### Added

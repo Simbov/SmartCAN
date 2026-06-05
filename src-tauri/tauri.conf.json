@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "SmartCAN",
         "width": 800,
         "height": 600,
