@@ -37,7 +37,9 @@ const PanelContainer: React.FC<PanelContainerProps> = ({ panelKey, children }) =
     panelPositions,
     togglePanelVisibility,
     panelOrder,
-    setPanelOrder
+    setPanelOrder,
+    activeDragKey,
+    setActiveDragKey
   } = useStore();
 
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -45,18 +47,30 @@ const PanelContainer: React.FC<PanelContainerProps> = ({ panelKey, children }) =
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData('text/plain', panelKey);
     e.dataTransfer.effectAllowed = 'move';
+    setActiveDragKey(panelKey);
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDragEnd = () => {
+    setActiveDragKey(null);
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
-    const sourceKey = e.dataTransfer.getData('text/plain');
+    const sourceKey = activeDragKey;
     if (!sourceKey || sourceKey === panelKey) return;
 
+    // 1. Instantly move zone of source panel to match target panel
+    const targetZone = panelPositions[panelKey] || 'sidebar';
+    if (panelPositions[sourceKey] !== targetZone) {
+      setPanelPosition(sourceKey, targetZone);
+    }
+
+    // 2. Instantly reorder panelOrder
     const newOrder = [...panelOrder];
     const sourceIdx = newOrder.indexOf(sourceKey);
     const targetIdx = newOrder.indexOf(panelKey);
 
-    if (sourceIdx !== -1 && targetIdx !== -1) {
+    if (sourceIdx !== -1 && targetIdx !== -1 && sourceIdx !== targetIdx) {
       newOrder.splice(sourceIdx, 1);
       newOrder.splice(targetIdx, 0, sourceKey);
       setPanelOrder(newOrder);
@@ -119,39 +133,36 @@ const PanelContainer: React.FC<PanelContainerProps> = ({ panelKey, children }) =
 
   const position = panelPositions[panelKey] || 'sidebar';
   const showWidthHandle = position !== 'sidebar';
+  const isDraggingThis = activeDragKey === panelKey;
 
   return (
     <div
       ref={containerRef}
       onDragOver={(e) => e.preventDefault()}
-      onDrop={handleDrop}
-      className={`relative h-full w-full transition-all duration-150 ${
-        isEditingLayout
-          ? 'border-2 border-dashed border-cyber-accent/40 rounded-xl bg-black/20 p-2 shadow-[0_0_10px_rgba(16,185,129,0.05)] hover:border-cyber-accent hover:shadow-[0_0_15px_rgba(16,185,129,0.2)]'
-          : ''
+      onDragEnter={handleDragEnter}
+      className={`relative h-full w-full transition-all duration-150 rounded-xl ${
+        isDraggingThis
+          ? 'opacity-30 border-2 border-dashed border-cyber-accent bg-cyber-accent/5 scale-95 shadow-[0_0_15px_rgba(16,185,129,0.2)] animate-pulse z-0'
+          : isEditingLayout
+            ? 'border-2 border-dashed border-cyber-accent/40 bg-black/20 p-2 shadow-[0_0_10px_rgba(16,185,129,0.05)] hover:border-cyber-accent hover:shadow-[0_0_15px_rgba(16,185,129,0.2)] z-10'
+            : 'z-10'
       }`}
     >
       {/* Edit Header Bar */}
       {isEditingLayout && (
         <div
-          className="flex items-center justify-between bg-[var(--bg-card-sub)] border border-[var(--border-color)] px-2.5 py-1.5 rounded-lg mb-2 text-[10px] font-bold select-none cursor-grab active:cursor-grabbing hover:bg-black/10 transition-colors"
+          className={`flex items-center justify-between bg-[var(--bg-card-sub)] border border-[var(--border-color)] px-2.5 py-1.5 rounded-lg mb-2 text-[10px] font-bold select-none transition-colors ${
+            isDraggingThis ? 'cursor-grabbing' : 'cursor-grab hover:bg-black/10'
+          }`}
           draggable
           onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
         >
           <div className="flex items-center gap-1.5 min-w-0">
             <GripHorizontal className="w-3.5 h-3.5 text-cyber-accent shrink-0" />
             <span className="truncate text-[var(--text-color)]">{PANEL_NAMES[panelKey]}</span>
           </div>
-          <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-            <select
-              value={position}
-              onChange={(e) => setPanelPosition(panelKey, e.target.value as 'sidebar' | 'main-top' | 'main-bottom')}
-              className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-1.5 py-0.5 text-[9px] outline-none font-semibold focus:border-cyber-accent/40"
-            >
-              <option value="sidebar">Left Sidebar</option>
-              <option value="main-top">Dashboard Top</option>
-              <option value="main-bottom">Dashboard Bottom</option>
-            </select>
+          <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
             <button
               onClick={() => togglePanelVisibility(panelKey)}
               className="p-0.5 hover:bg-red-500/10 hover:text-red-400 rounded transition-colors"
@@ -163,13 +174,13 @@ const PanelContainer: React.FC<PanelContainerProps> = ({ panelKey, children }) =
         </div>
       )}
 
-      {/* Panel Contents */}
-      <div className={isEditingLayout ? 'h-[calc(100%-34px)] overflow-hidden' : 'h-full'}>
+      {/* Panel Contents (Hidden if dragging this tile to represent ghost placeholder) */}
+      <div className={isDraggingThis ? 'invisible' : isEditingLayout ? 'h-[calc(100%-34px)] overflow-hidden' : 'h-full'}>
         {children}
       </div>
 
       {/* Resize Handles */}
-      {isEditingLayout && (
+      {isEditingLayout && !isDraggingThis && (
         <>
           {/* Right edge drag width handle */}
           {showWidthHandle && (
@@ -200,6 +211,7 @@ const App: React.FC = () => {
     panelOrder,
     theme,
     isEditingLayout,
+    activeDragKey,
     togglePanelVisibility,
     setPanelPosition
   } = useStore();
@@ -249,6 +261,10 @@ const App: React.FC = () => {
 
   const handleZoneDragOver = (e: React.DragEvent, zone: 'sidebar' | 'main-top' | 'main-bottom') => {
     e.preventDefault();
+    const sourceKey = activeDragKey;
+    if (sourceKey && panelPositions[sourceKey] !== zone) {
+      setPanelPosition(sourceKey, zone);
+    }
     if (activeDragOverZone !== zone) {
       setActiveDragOverZone(zone);
     }
@@ -258,13 +274,9 @@ const App: React.FC = () => {
     setActiveDragOverZone(null);
   };
 
-  const handleZoneDrop = (e: React.DragEvent, zone: 'sidebar' | 'main-top' | 'main-bottom') => {
+  const handleZoneDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setActiveDragOverZone(null);
-    const sourceKey = e.dataTransfer.getData('text/plain');
-    if (sourceKey) {
-      setPanelPosition(sourceKey, zone);
-    }
   };
 
   return (
@@ -315,7 +327,7 @@ const App: React.FC = () => {
                 <section
                   onDragOver={(e) => handleZoneDragOver(e, 'sidebar')}
                   onDragLeave={handleZoneDragLeave}
-                  onDrop={(e) => handleZoneDrop(e, 'sidebar')}
+                  onDrop={handleZoneDrop}
                   className={`flex flex-col gap-4 overflow-y-auto overflow-x-hidden p-2 rounded-xl transition-all duration-200 border-2 ${
                     isEditingLayout
                       ? activeDragOverZone === 'sidebar'
@@ -355,7 +367,7 @@ const App: React.FC = () => {
                     <div
                       onDragOver={(e) => handleZoneDragOver(e, 'main-top')}
                       onDragLeave={handleZoneDragLeave}
-                      onDrop={(e) => handleZoneDrop(e, 'main-top')}
+                      onDrop={handleZoneDrop}
                       className={`grid grid-cols-12 gap-4 p-2 rounded-xl transition-all duration-200 border-2 ${
                         isEditingLayout
                           ? activeDragOverZone === 'main-top'
@@ -400,7 +412,7 @@ const App: React.FC = () => {
                     <div
                       onDragOver={(e) => handleZoneDragOver(e, 'main-bottom')}
                       onDragLeave={handleZoneDragLeave}
-                      onDrop={(e) => handleZoneDrop(e, 'main-bottom')}
+                      onDrop={handleZoneDrop}
                       className={`grid grid-cols-12 gap-4 p-2 rounded-xl transition-all duration-200 border-2 ${
                         isEditingLayout
                           ? activeDragOverZone === 'main-bottom'

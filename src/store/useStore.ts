@@ -91,6 +91,7 @@ interface CanStore {
   panelWidths: Record<string, number>;
   panelHeights: Record<string, number>;
   panelOrder: string[];
+  activeDragKey: string | null;
   
   // DBC Databases
   dbcs: Record<string, DbcDatabase>;
@@ -128,6 +129,7 @@ interface CanStore {
   setPanelWidth: (panelName: string, width: number) => void;
   setPanelHeight: (panelName: string, height: number) => void;
   setPanelOrder: (order: string[]) => void;
+  setActiveDragKey: (key: string | null) => void;
   loadDbcFile: (name: string, content: string) => void;
   unloadDbc: () => void;
   
@@ -231,6 +233,7 @@ export const useStore = create<CanStore>((set, get) => {
       'diagnostics',
       'falseSender'
     ],
+    activeDragKey: null,
     dbcs: {
       'Default J1939 Database': defaultDbcJ1939,
       'Default CANopen Database': defaultDbcCanopen
@@ -356,6 +359,7 @@ export const useStore = create<CanStore>((set, get) => {
     })),
 
     setPanelOrder: (panelOrder) => set({ panelOrder }),
+    setActiveDragKey: (activeDragKey) => set({ activeDragKey }),
 
     setConnected: async (isConnected) => {
       const state = get();
