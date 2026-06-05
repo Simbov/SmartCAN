@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-06-05
+
 ### Added
 - **Graphical DBC Builder & Editor**: Graphical nodes, messages, and signals CRUD panel inside the DBC Manager with automatic Vector DBC serialization.
 - **Advanced CAN Traffic Filtering & Heatmap**:
