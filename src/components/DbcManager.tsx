@@ -53,6 +53,30 @@ export const DbcManager: React.FC = () => {
   const dbcFileInputRef = useRef<HTMLInputElement>(null);
   const smartcanFileInputRef = useRef<HTMLInputElement>(null);
 
+  const [uploadType, setUploadType] = useState<'custom' | 'device'>('custom');
+  const [localInputs, setLocalInputs] = useState<Record<string, string>>({});
+
+  const getLocalValue = (key: string, originalVal: any) => {
+    return localInputs[key] !== undefined ? localInputs[key] : String(originalVal);
+  };
+
+  const handleLocalChange = (key: string, val: string) => {
+    setLocalInputs(prev => ({ ...prev, [key]: val }));
+  };
+
+  const handleLocalBlur = (key: string, parser: (val: string) => any, updater: (val: any) => void) => {
+    const val = localInputs[key];
+    if (val !== undefined) {
+      const parsed = parser(val);
+      updater(parsed);
+      setLocalInputs(prev => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  };
+
   const handleDbcUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -60,7 +84,7 @@ export const DbcManager: React.FC = () => {
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
-      importDbcToProject(file.name, content);
+      importDbcToProject(file.name, content, uploadType);
       setInspectedDbcName(file.name);
       setSelectedMsgId(null);
       setActiveTab('inspect');
@@ -249,29 +273,23 @@ export const DbcManager: React.FC = () => {
   const handleUpdateMessageHeader = (oldId: number, newId: number, name: string, dlc: number, sender: string) => {
     if (!draftDb) return;
     const trimmedName = name.trim().replace(/\s+/g, '_');
-    if (!trimmedName) {
-      alert('Message name cannot be empty.');
-      return;
-    }
-    if (newId !== oldId && draftDb.messages[newId]) {
-      alert(`A message with ID ${newId} already exists.`);
-      return;
-    }
     const updatedMessages = { ...draftDb.messages };
     const originalMsg = updatedMessages[oldId];
-    delete updatedMessages[oldId];
-    updatedMessages[newId] = {
-      ...originalMsg,
-      id: newId,
-      name: trimmedName,
-      dlc,
-      sender
-    };
-    setDraftDb({
-      ...draftDb,
-      messages: updatedMessages
-    });
-    setEditingMsgId(newId);
+    if (originalMsg) {
+      delete updatedMessages[oldId];
+      updatedMessages[newId] = {
+        ...originalMsg,
+        id: newId,
+        name: trimmedName || originalMsg.name, // Keep old name if empty during typing
+        dlc,
+        sender
+      };
+      setDraftDb({
+        ...draftDb,
+        messages: updatedMessages
+      });
+      setEditingMsgId(newId);
+    }
   };
 
   const handleAddSignal = (msgId: number) => {
@@ -425,12 +443,23 @@ export const DbcManager: React.FC = () => {
           <button
             onClick={(e) => {
               e.stopPropagation();
+              const filename = entry.name.endsWith('.dbc') ? entry.name : `${entry.name}.dbc`;
+              saveTextFile(filename, entry.content, [{ name: 'CAN Database File', extensions: ['dbc'] }]);
+            }}
+            className="p-1 text-[var(--text-muted)] hover:text-sky-500 dark:hover:text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+            title={`Export/Save ${entry.name} as .dbc File`}
+          >
+            <Download className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
               removeDbcFromProject(entry.name);
             }}
             className="p-1 text-[var(--text-muted)] hover:text-red-500 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
             title={`Remove ${entry.type === 'custom' ? 'Custom DBC' : entry.type === 'device' ? 'Device Template' : 'Generic Protocol'}`}
           >
-            <Trash2 className="w-3 h-3" />
+            <Trash2 className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
@@ -581,7 +610,10 @@ export const DbcManager: React.FC = () => {
                   <Plus className="w-2.5 h-2.5" /> Create
                 </button>
                 <button
-                  onClick={() => dbcFileInputRef.current?.click()}
+                  onClick={() => {
+                    setUploadType('custom');
+                    dbcFileInputRef.current?.click();
+                  }}
                   className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-color)] hover:border-[var(--text-muted)] bg-[var(--bg-input)] text-[var(--text-color)] transition-colors"
                 >
                   <Upload className="w-2.5 h-2.5" /> Load File
@@ -624,13 +656,44 @@ export const DbcManager: React.FC = () => {
 
           {/* Device-Specific DBCs */}
           <div className="flex flex-col gap-1.5">
-            <button
-              onClick={() => setDeviceOpen(!deviceOpen)}
-              className="flex items-center gap-1 text-xs font-semibold text-[var(--text-color)] hover:opacity-80 px-1 text-left"
-            >
-              {deviceOpen ? <ChevronDown className="w-3 h-3 text-[var(--text-muted)]" /> : <ChevronRight className="w-3 h-3 text-[var(--text-muted)]" />}
-              Device Templates ({deviceDBCs.length})
-            </button>
+            <div className="flex items-center justify-between px-1">
+              <button
+                onClick={() => setDeviceOpen(!deviceOpen)}
+                className="flex items-center gap-1 text-xs font-semibold text-[var(--text-color)] hover:opacity-80 text-left"
+              >
+                {deviceOpen ? <ChevronDown className="w-3 h-3 text-[var(--text-muted)]" /> : <ChevronRight className="w-3 h-3 text-[var(--text-muted)]" />}
+                Device Templates ({deviceDBCs.length})
+              </button>
+              <div className="flex gap-1.5 flex-shrink-0">
+                <button
+                  onClick={() => {
+                    const name = prompt('Enter name for the new Device Template DBC:');
+                    if (name) {
+                      createEmptyDbc(name, 'device');
+                      const trimmed = name.trim();
+                      setInspectedDbcName(trimmed);
+                      setSelectedMsgId(null);
+                      setActiveTab('graphical');
+                      setEditingDbcName(trimmed);
+                      setEditingDbcContent(`BU_: Master_Node\n`);
+                      setDraftDb({ nodes: ['Master_Node'], messages: {} });
+                    }
+                  }}
+                  className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-color)] hover:border-[var(--text-muted)] bg-[var(--bg-input)] text-[var(--text-color)] transition-colors"
+                >
+                  <Plus className="w-2.5 h-2.5" /> Create
+                </button>
+                <button
+                  onClick={() => {
+                    setUploadType('device');
+                    dbcFileInputRef.current?.click();
+                  }}
+                  className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-color)] hover:border-[var(--text-muted)] bg-[var(--bg-input)] text-[var(--text-color)] transition-colors"
+                >
+                  <Upload className="w-2.5 h-2.5" /> Load File
+                </button>
+              </div>
+            </div>
             {deviceOpen && (
               <div className="pl-2 flex flex-col gap-1">
                 {deviceDBCs.map(renderDbcRow)}
@@ -1127,8 +1190,15 @@ export const DbcManager: React.FC = () => {
                                     <label className="text-[10px] text-[var(--text-muted)] font-bold">Message Name</label>
                                     <input
                                       type="text"
-                                      value={currentMsg.name}
-                                      onChange={(e) => handleUpdateMessageHeader(currentMsg.id, currentMsg.id, e.target.value, currentMsg.dlc, currentMsg.sender)}
+                                      value={getLocalValue(`${currentMsg.id}-name`, currentMsg.name)}
+                                      onChange={(e) => handleLocalChange(`${currentMsg.id}-name`, e.target.value)}
+                                      onBlur={() => handleLocalBlur(
+                                        `${currentMsg.id}-name`,
+                                        (v) => v.trim().replace(/\s+/g, '_'),
+                                        (v) => {
+                                          if (v) handleUpdateMessageHeader(currentMsg.id, currentMsg.id, v, currentMsg.dlc, currentMsg.sender);
+                                        }
+                                      )}
                                       className="glass-input py-1 px-2 text-xs"
                                     />
                                   </div>
@@ -1136,16 +1206,23 @@ export const DbcManager: React.FC = () => {
                                     <label className="text-[10px] text-[var(--text-muted)] font-bold">Message ID (Hex or Dec)</label>
                                     <input
                                       type="text"
-                                      value={`0x${currentMsg.id.toString(16).toUpperCase()}`}
-                                      onChange={(e) => {
-                                        let val = parseInt(e.target.value.trim(), 10);
-                                        if (e.target.value.trim().toLowerCase().startsWith('0x')) {
-                                          val = parseInt(e.target.value.trim(), 16);
+                                      value={getLocalValue(`${currentMsg.id}-id`, `0x${currentMsg.id.toString(16).toUpperCase()}`)}
+                                      onChange={(e) => handleLocalChange(`${currentMsg.id}-id`, e.target.value)}
+                                      onBlur={() => handleLocalBlur(
+                                        `${currentMsg.id}-id`,
+                                        (v) => {
+                                          let val = parseInt(v.trim(), 10);
+                                          if (v.trim().toLowerCase().startsWith('0x')) {
+                                            val = parseInt(v.trim(), 16);
+                                          }
+                                          return isNaN(val) ? currentMsg.id : val;
+                                        },
+                                        (val) => {
+                                          if (val !== currentMsg.id) {
+                                            handleUpdateMessageHeader(currentMsg.id, val, currentMsg.name, currentMsg.dlc, currentMsg.sender);
+                                          }
                                         }
-                                        if (!isNaN(val) && val >= 0) {
-                                          handleUpdateMessageHeader(currentMsg.id, val, currentMsg.name, currentMsg.dlc, currentMsg.sender);
-                                        }
-                                      }}
+                                      )}
                                       className="glass-input py-1 px-2 text-xs font-mono"
                                     />
                                   </div>
@@ -1209,8 +1286,13 @@ export const DbcManager: React.FC = () => {
                                           <label className="text-[10px] text-[var(--text-muted)] font-bold">Signal Name</label>
                                           <input
                                             type="text"
-                                            value={sig.name}
-                                            onChange={(e) => handleUpdateSignal(currentMsg.id, sigIdx, { name: e.target.value.trim().replace(/\s+/g, '_') })}
+                                            value={getLocalValue(`${currentMsg.id}-${sigIdx}-name`, sig.name)}
+                                            onChange={(e) => handleLocalChange(`${currentMsg.id}-${sigIdx}-name`, e.target.value)}
+                                            onBlur={() => handleLocalBlur(
+                                              `${currentMsg.id}-${sigIdx}-name`,
+                                              (v) => v.trim().replace(/\s+/g, '_'),
+                                              (v) => handleUpdateSignal(currentMsg.id, sigIdx, { name: v })
+                                            )}
                                             className="glass-input py-1 px-2 text-xs"
                                           />
                                         </div>
@@ -1219,11 +1301,14 @@ export const DbcManager: React.FC = () => {
                                         <div className="flex flex-col gap-1">
                                           <label className="text-[10px] text-[var(--text-muted)] font-bold">Start Bit (0-63)</label>
                                           <input
-                                            type="number"
-                                            min={0}
-                                            max={63}
-                                            value={sig.startBit}
-                                            onChange={(e) => handleUpdateSignal(currentMsg.id, sigIdx, { startBit: Math.max(0, Math.min(63, parseInt(e.target.value, 10) || 0)) })}
+                                            type="text"
+                                            value={getLocalValue(`${currentMsg.id}-${sigIdx}-startBit`, sig.startBit)}
+                                            onChange={(e) => handleLocalChange(`${currentMsg.id}-${sigIdx}-startBit`, e.target.value)}
+                                            onBlur={() => handleLocalBlur(
+                                              `${currentMsg.id}-${sigIdx}-startBit`,
+                                              (v) => Math.max(0, Math.min(63, parseInt(v, 10) || 0)),
+                                              (v) => handleUpdateSignal(currentMsg.id, sigIdx, { startBit: v })
+                                            )}
                                             className="glass-input py-1 px-2 text-xs"
                                           />
                                         </div>
@@ -1232,11 +1317,14 @@ export const DbcManager: React.FC = () => {
                                         <div className="flex flex-col gap-1">
                                           <label className="text-[10px] text-[var(--text-muted)] font-bold">Length (1-64 bits)</label>
                                           <input
-                                            type="number"
-                                            min={1}
-                                            max={64}
-                                            value={sig.length}
-                                            onChange={(e) => handleUpdateSignal(currentMsg.id, sigIdx, { length: Math.max(1, Math.min(64, parseInt(e.target.value, 10) || 1)) })}
+                                            type="text"
+                                            value={getLocalValue(`${currentMsg.id}-${sigIdx}-length`, sig.length)}
+                                            onChange={(e) => handleLocalChange(`${currentMsg.id}-${sigIdx}-length`, e.target.value)}
+                                            onBlur={() => handleLocalBlur(
+                                              `${currentMsg.id}-${sigIdx}-length`,
+                                              (v) => Math.max(1, Math.min(64, parseInt(v, 10) || 1)),
+                                              (v) => handleUpdateSignal(currentMsg.id, sigIdx, { length: v })
+                                            )}
                                             className="glass-input py-1 px-2 text-xs"
                                           />
                                         </div>
@@ -1247,10 +1335,14 @@ export const DbcManager: React.FC = () => {
                                         <div className="flex flex-col gap-1">
                                           <label className="text-[10px] text-[var(--text-muted)] font-bold">Factor (Scaling)</label>
                                           <input
-                                            type="number"
-                                            step="any"
-                                            value={sig.factor}
-                                            onChange={(e) => handleUpdateSignal(currentMsg.id, sigIdx, { factor: parseFloat(e.target.value) || 1 })}
+                                            type="text"
+                                            value={getLocalValue(`${currentMsg.id}-${sigIdx}-factor`, sig.factor)}
+                                            onChange={(e) => handleLocalChange(`${currentMsg.id}-${sigIdx}-factor`, e.target.value)}
+                                            onBlur={() => handleLocalBlur(
+                                              `${currentMsg.id}-${sigIdx}-factor`,
+                                              (v) => parseFloat(v) || 1,
+                                              (v) => handleUpdateSignal(currentMsg.id, sigIdx, { factor: v })
+                                            )}
                                             className="glass-input py-1 px-2 text-xs"
                                           />
                                         </div>
@@ -1259,10 +1351,14 @@ export const DbcManager: React.FC = () => {
                                         <div className="flex flex-col gap-1">
                                           <label className="text-[10px] text-[var(--text-muted)] font-bold">Offset (Bias)</label>
                                           <input
-                                            type="number"
-                                            step="any"
-                                            value={sig.offset}
-                                            onChange={(e) => handleUpdateSignal(currentMsg.id, sigIdx, { offset: parseFloat(e.target.value) || 0 })}
+                                            type="text"
+                                            value={getLocalValue(`${currentMsg.id}-${sigIdx}-offset`, sig.offset)}
+                                            onChange={(e) => handleLocalChange(`${currentMsg.id}-${sigIdx}-offset`, e.target.value)}
+                                            onBlur={() => handleLocalBlur(
+                                              `${currentMsg.id}-${sigIdx}-offset`,
+                                              (v) => parseFloat(v) || 0,
+                                              (v) => handleUpdateSignal(currentMsg.id, sigIdx, { offset: v })
+                                            )}
                                             className="glass-input py-1 px-2 text-xs"
                                           />
                                         </div>
@@ -1271,10 +1367,14 @@ export const DbcManager: React.FC = () => {
                                         <div className="flex flex-col gap-1">
                                           <label className="text-[10px] text-[var(--text-muted)] font-bold">Min Value</label>
                                           <input
-                                            type="number"
-                                            step="any"
-                                            value={sig.min}
-                                            onChange={(e) => handleUpdateSignal(currentMsg.id, sigIdx, { min: parseFloat(e.target.value) || 0 })}
+                                            type="text"
+                                            value={getLocalValue(`${currentMsg.id}-${sigIdx}-min`, sig.min)}
+                                            onChange={(e) => handleLocalChange(`${currentMsg.id}-${sigIdx}-min`, e.target.value)}
+                                            onBlur={() => handleLocalBlur(
+                                              `${currentMsg.id}-${sigIdx}-min`,
+                                              (v) => parseFloat(v) || 0,
+                                              (v) => handleUpdateSignal(currentMsg.id, sigIdx, { min: v })
+                                            )}
                                             className="glass-input py-1 px-2 text-xs"
                                           />
                                         </div>
@@ -1283,10 +1383,14 @@ export const DbcManager: React.FC = () => {
                                         <div className="flex flex-col gap-1">
                                           <label className="text-[10px] text-[var(--text-muted)] font-bold">Max Value</label>
                                           <input
-                                            type="number"
-                                            step="any"
-                                            value={sig.max}
-                                            onChange={(e) => handleUpdateSignal(currentMsg.id, sigIdx, { max: parseFloat(e.target.value) || 0 })}
+                                            type="text"
+                                            value={getLocalValue(`${currentMsg.id}-${sigIdx}-max`, sig.max)}
+                                            onChange={(e) => handleLocalChange(`${currentMsg.id}-${sigIdx}-max`, e.target.value)}
+                                            onBlur={() => handleLocalBlur(
+                                              `${currentMsg.id}-${sigIdx}-max`,
+                                              (v) => parseFloat(v) || 0,
+                                              (v) => handleUpdateSignal(currentMsg.id, sigIdx, { max: v })
+                                            )}
                                             className="glass-input py-1 px-2 text-xs"
                                           />
                                         </div>
@@ -1299,8 +1403,13 @@ export const DbcManager: React.FC = () => {
                                           <input
                                             type="text"
                                             placeholder="e.g. rpm, C, V"
-                                            value={sig.unit}
-                                            onChange={(e) => handleUpdateSignal(currentMsg.id, sigIdx, { unit: e.target.value })}
+                                            value={getLocalValue(`${currentMsg.id}-${sigIdx}-unit`, sig.unit)}
+                                            onChange={(e) => handleLocalChange(`${currentMsg.id}-${sigIdx}-unit`, e.target.value)}
+                                            onBlur={() => handleLocalBlur(
+                                              `${currentMsg.id}-${sigIdx}-unit`,
+                                              (v) => v,
+                                              (v) => handleUpdateSignal(currentMsg.id, sigIdx, { unit: v })
+                                            )}
                                             className="glass-input py-1 px-2 text-xs"
                                           />
                                         </div>
@@ -1379,13 +1488,93 @@ export const DbcManager: React.FC = () => {
                     <div className="flex gap-2.5 border-t border-[var(--border-color)] pt-3.5 flex-shrink-0">
                       <button
                         onClick={() => {
-                          const serialized = serializeDbc(draftDb);
                           const oldName = inspectedEntry?.name || inspectedDbcName;
                           const newName = editingDbcName.trim();
                           if (!newName) {
                             alert('Database name cannot be empty.');
                             return;
                           }
+
+                          const errors: string[] = [];
+                          if (!draftDb) {
+                            errors.push("No database content to save.");
+                          } else {
+                            // Validate database name uniqueness if it changed
+                            const nameExists = dbcRegistry.some(e => e.name === newName && e.name !== oldName);
+                            if (nameExists) {
+                              errors.push(`A database named "${newName}" already exists in the registry.`);
+                            }
+
+                            // Validate nodes
+                            draftDb.nodes.forEach(node => {
+                              if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(node)) {
+                                errors.push(`Node name "${node}" is invalid. Node names must start with a letter or underscore, and contain only letters, numbers, or underscores.`);
+                              }
+                            });
+
+                            // Validate messages and signals
+                            const seenMsgNames = new Set<string>();
+                            const seenMsgIds = new Set<number>();
+                            
+                            Object.values(draftDb.messages).forEach(msg => {
+                              if (!msg.name) {
+                                errors.push(`Message with ID ${msg.id} has an empty name.`);
+                              } else {
+                                if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(msg.name)) {
+                                  errors.push(`Message name "${msg.name}" (ID ${msg.id}) is invalid. Message names must start with a letter or underscore, and contain only letters, numbers, or underscores.`);
+                                }
+                                if (seenMsgNames.has(msg.name)) {
+                                  errors.push(`Duplicate message name found: "${msg.name}". Message names must be unique.`);
+                                }
+                                seenMsgNames.add(msg.name);
+                              }
+
+                              if (seenMsgIds.has(msg.id)) {
+                                errors.push(`Duplicate message ID found: ${msg.id} (0x${msg.id.toString(16).toUpperCase()}). Message IDs must be unique.`);
+                              }
+                              seenMsgIds.add(msg.id);
+
+                              if (msg.dlc < 1 || msg.dlc > 64) {
+                                errors.push(`Message "${msg.name}" has invalid DLC ${msg.dlc}. DLC must be between 1 and 64.`);
+                              }
+
+                              const seenSigNames = new Set<string>();
+                              msg.signals.forEach((sig, sigIdx) => {
+                                const sigRef = `Signal "${sig.name || `Index ${sigIdx}`}" in message "${msg.name}"`;
+                                if (!sig.name) {
+                                  errors.push(`An unnamed signal was found at index ${sigIdx} in message "${msg.name}".`);
+                                } else {
+                                  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(sig.name)) {
+                                    errors.push(`Signal name "${sig.name}" in message "${msg.name}" is invalid. Signal names must start with a letter or underscore, and contain only letters, numbers, or underscores.`);
+                                  }
+                                  if (seenSigNames.has(sig.name)) {
+                                    errors.push(`Duplicate signal name "${sig.name}" in message "${msg.name}". Signal names must be unique within a message.`);
+                                  }
+                                  seenSigNames.add(sig.name);
+                                }
+
+                                if (sig.startBit < 0 || sig.startBit > 511) {
+                                  errors.push(`${sigRef} has invalid start bit ${sig.startBit}. Start bit must be between 0 and 511.`);
+                                }
+                                if (sig.length < 1 || sig.length > 64) {
+                                  errors.push(`${sigRef} has invalid length ${sig.length}. Length must be between 1 and 64.`);
+                                }
+                                if (sig.factor === 0) {
+                                  errors.push(`${sigRef} factor cannot be 0.`);
+                                }
+                                if (sig.min > sig.max) {
+                                  errors.push(`${sigRef} min value (${sig.min}) cannot be greater than max value (${sig.max}).`);
+                                }
+                              });
+                            });
+                          }
+
+                          if (errors.length > 0) {
+                            alert(`Please fix the following validation errors before saving:\n\n${errors.slice(0, 15).join('\n')}${errors.length > 15 ? `\n...and ${errors.length - 15} more errors.` : ''}`);
+                            return;
+                          }
+
+                          const serialized = serializeDbc(draftDb!);
                           updateDbc(oldName, newName, serialized);
                           setInspectedDbcName(newName);
                           setActiveTab('inspect');

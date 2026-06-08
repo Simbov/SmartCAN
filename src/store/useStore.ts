@@ -4,7 +4,7 @@ import type { DbcDatabase } from '../lib/dbcParser';
 import { createCanopenNode, handleNmtCommand, handleSdoRequest, generateHeartbeatFrame } from '../lib/canopen';
 import type { CanopenNode } from '../lib/canopen';
 import { parseJ1939Id, buildJ1939Id, J1939TpReassembler } from '../lib/j1939';
-import { isTauriEnv } from '../lib/tauriAdapter';
+import { isTauriEnv, saveTextFile } from '../lib/tauriAdapter';
 import { BUILT_IN_DBCS } from '../lib/builtInDbcs';
 
 // Default Mock DBC for J1939
@@ -39,6 +39,8 @@ export interface CanDevice {
     data: Uint8Array;
     interval: number; // ms, 0 = single shot
     enabled: boolean;
+    signals?: Record<string, number>;
+    templateKey?: string;
   }>;
 }
 
@@ -123,6 +125,7 @@ interface CanStore {
   logs: CanLog[];
   fixedLogs: Record<number, CanLog>;
   pausedLogs: boolean;
+  totalFramesReceived: number;
   
   // Realtime Plotting
   plotSignals: string[];
@@ -159,10 +162,10 @@ interface CanStore {
   setActiveProject: (id: string) => void;
   deleteProject: (id: string) => void;
   toggleDbcInProject: (dbcName: string) => void;
-  importDbcToProject: (name: string, content: string) => void;
+  importDbcToProject: (name: string, content: string, type?: 'custom' | 'device' | 'generic') => void;
   removeDbcFromProject: (name: string) => void;
   updateDbc: (oldName: string, newName: string, content: string) => void;
-  createEmptyDbc: (name: string) => void;
+  createEmptyDbc: (name: string, type?: 'custom' | 'device' | 'generic') => void;
   restoreDefaultDbcs: () => void;
   saveSmartCanFile: () => void;
   loadSmartCanFile: (jsonContent: string) => void;
@@ -207,6 +210,256 @@ const defaultDbcJ1939 = parseDbc(DEFAULT_J1939_DBC);
 // Keep a local reference for the tauri listener unlisten promise
 let kvaserUnlisten: (() => void) | null = null;
 
+function reconstructDevices(devices: any[]): CanDevice[] {
+  if (!Array.isArray(devices)) return [];
+  return devices.map((d: any) => ({
+    id: d.id || `dev-${Date.now()}-${Math.random()}`,
+    name: d.name || 'Unnamed ECU',
+    nodeId: typeof d.nodeId === 'number' ? d.nodeId : 1,
+    enabled: d.enabled !== false,
+    isSimulated: d.isSimulated !== false,
+    customMessages: Array.isArray(d.customMessages)
+      ? d.customMessages.map((msg: any) => {
+          const dlc = Number(msg.dlc) || 8;
+          const dataBytes = new Uint8Array(dlc);
+          if (msg.data) {
+            if (Array.isArray(msg.data)) {
+              dataBytes.set(msg.data.slice(0, dlc));
+            } else if (typeof msg.data === 'object') {
+              const rawData = msg.data.data || msg.data;
+              if (Array.isArray(rawData)) {
+                dataBytes.set(rawData.slice(0, dlc));
+              } else {
+                for (let i = 0; i < dlc; i++) {
+                  if (rawData[i] !== undefined) {
+                    dataBytes[i] = Number(rawData[i]) || 0;
+                  }
+                }
+              }
+            }
+          }
+          return {
+            id: Number(msg.id) || 0,
+            name: msg.name || `Msg_0x${msg.id?.toString(16)}`,
+            dlc,
+            data: dataBytes,
+            interval: typeof msg.interval === 'number' ? msg.interval : 500,
+            enabled: msg.enabled !== false,
+            signals: msg.signals || {},
+            templateKey: msg.templateKey || undefined
+          };
+        })
+      : []
+  }));
+}
+
+const getInitialState = () => {
+  const defaultState = {
+    protocol: 'j1939' as const,
+    baudRate: 250000,
+    isConnected: false,
+    kvaserStatus: 'offline' as const,
+    kvaserDeviceName: null,
+    connectionError: null,
+    theme: 'light' as const,
+    visiblePanels: {
+      deviceManager: true, // Logical ECU Tree visible by default
+      dbcManager: false,
+      liveViewer: true,
+      livePlotter: false,
+      transmitter: false,
+      diagnostics: false,
+      falseSender: false
+    },
+    panelPositions: {
+      deviceManager: 'sidebar' as const,
+      dbcManager: 'sidebar' as const,
+      liveViewer: 'main-top' as const,
+      livePlotter: 'main-top' as const,
+      transmitter: 'main-bottom' as const,
+      diagnostics: 'main-bottom' as const,
+      falseSender: 'main-bottom' as const
+    },
+    isEditingLayout: false,
+    panelWidths: {
+      deviceManager: 3,
+      dbcManager: 3,
+      liveViewer: 6,
+      livePlotter: 6,
+      transmitter: 6,
+      diagnostics: 6,
+      falseSender: 6
+    },
+    panelHeights: {
+      deviceManager: 400,
+      dbcManager: 400,
+      liveViewer: 400,
+      livePlotter: 400,
+      transmitter: 250,
+      diagnostics: 250,
+      falseSender: 250
+    },
+    panelOrder: [
+      'deviceManager',
+      'dbcManager',
+      'liveViewer',
+      'livePlotter',
+      'transmitter',
+      'diagnostics',
+      'falseSender'
+    ],
+    dragOverZone: null as 'sidebar' | 'main-top' | 'main-bottom' | null,
+    activeDragKey: null as string | null,
+    dragOverTargetKey: null as string | null,
+    
+    // DBC Database
+    dbcs: {
+      'Default J1939 Database': defaultDbcJ1939
+    } as Record<string, DbcDatabase>,
+    activeDbcName: 'Default J1939 Database',
+    
+    // Devices and Registry
+    devices: [
+      { id: 'dev-1', name: 'Engine ECU', nodeId: 1, enabled: true, isSimulated: true, customMessages: [] },
+      { id: 'dev-2', name: 'Transmission ECU', nodeId: 3, enabled: true, isSimulated: true, customMessages: [] }
+    ] as CanDevice[],
+    projectSettings: {
+      name: 'Default Project',
+      disabledMessageIds: {} as Record<number, boolean>,
+      messageNameOverrides: {} as Record<number, string>
+    },
+    projects: [
+      {
+        id: 'proj-default',
+        name: 'Default Project',
+        protocol: 'j1939' as const,
+        baudRate: 250000,
+        enabled: true,
+        enabledDbcNames: ['Default J1939 Database'],
+        devices: [
+          { id: 'dev-1', name: 'Engine ECU', nodeId: 1, enabled: true, isSimulated: true, customMessages: [] },
+          { id: 'dev-2', name: 'Transmission ECU', nodeId: 3, enabled: true, isSimulated: true, customMessages: [] }
+        ],
+        disabledMessageIds: {},
+        messageNameOverrides: {}
+      }
+    ] as SmartCanProject[],
+    activeProjectId: 'proj-default',
+    dbcRegistry: [
+      {
+        name: 'Default J1939 Database',
+        content: DEFAULT_J1939_DBC,
+        type: 'generic' as const,
+        enabled: true
+      },
+      ...BUILT_IN_DBCS.filter(d => d.name !== 'Default J1939 Database').map(d => ({
+        name: d.name,
+        content: d.content,
+        type: d.category === 'generic' ? 'generic' as const : 'device' as const,
+        enabled: false
+      }))
+    ] as DbcRegistryEntry[],
+    
+    // Logs
+    logs: [] as CanLog[],
+    fixedLogs: {} as Record<number, CanLog>,
+    pausedLogs: false,
+    totalFramesReceived: 0,
+    
+    // Plot
+    plotSignals: [] as string[],
+    plotPoints: [] as PlotPoint[],
+    
+    // Simulation
+    isSimulating: false,
+    simTime: 0,
+    simulationTimer: null as ReturnType<typeof setInterval> | null,
+    canopenNodes: {
+      1: createCanopenNode(1),
+      2: createCanopenNode(2)
+    } as Record<number, CanopenNode>,
+    tpReassembler: new J1939TpReassembler()
+  };
+
+  if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+    try {
+      const raw = localStorage.getItem('smartcan_state_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          const activeProjId = parsed.activeProjectId || defaultState.activeProjectId;
+          const restoredProjects = Array.isArray(parsed.projects)
+            ? parsed.projects.map((proj: any) => ({
+                ...proj,
+                devices: reconstructDevices(proj.devices)
+              }))
+            : defaultState.projects;
+          const activeProj = restoredProjects.find((p: any) => p.id === activeProjId) || restoredProjects[0] || defaultState.projects[0];
+          
+          const restoredRegistry = Array.isArray(parsed.dbcRegistry) 
+            ? parsed.dbcRegistry.map((entry: any) => ({
+                name: entry.name,
+                content: entry.content,
+                type: entry.type || 'custom',
+                enabled: entry.enabled
+              }))
+            : defaultState.dbcRegistry;
+
+          // Parse active DBC databases
+          const parsedDbcs: Record<string, DbcDatabase> = {};
+          restoredRegistry.forEach((entry: any) => {
+            if (entry.enabled) {
+              try {
+                parsedDbcs[entry.name] = parseDbc(entry.content);
+              } catch (e) {
+                console.error('Failed to parse enabled DBC on load:', entry.name, e);
+              }
+            }
+          });
+
+          return {
+            ...defaultState,
+            ...parsed,
+            projects: restoredProjects,
+            activeProjectId: activeProjId,
+            dbcRegistry: restoredRegistry,
+            dbcs: parsedDbcs,
+            protocol: activeProj.protocol,
+            baudRate: activeProj.baudRate,
+            devices: activeProj.devices || [],
+            projectSettings: {
+              name: activeProj.name || 'Default Project',
+              disabledMessageIds: activeProj.disabledMessageIds || {},
+              messageNameOverrides: activeProj.messageNameOverrides || {}
+            },
+            isConnected: false,
+            kvaserStatus: 'offline' as const,
+            kvaserDeviceName: null,
+            connectionError: null,
+            isSimulating: false,
+            simTime: 0,
+            simulationTimer: null,
+            logs: [],
+            fixedLogs: {},
+            totalFramesReceived: 0,
+            plotPoints: [],
+            canopenNodes: activeProj.protocol === 'canopen' ? (() => {
+              const nodes: Record<number, CanopenNode> = {};
+              (activeProj.devices || []).forEach((d: any) => {
+                nodes[d.nodeId] = createCanopenNode(d.nodeId);
+              });
+              return nodes;
+            })() : {}
+          };
+        }
+      }
+    } catch (e) {
+      console.error('Failed to restore state from localStorage:', e);
+    }
+  }
+  return defaultState;
+};
+
 export const useStore = create<CanStore>((set, get) => {
   // Keep track of last timestamps per ID for delta calculations
   const lastTimestampsById: Record<number, number> = {};
@@ -248,140 +501,7 @@ export const useStore = create<CanStore>((set, get) => {
   };
 
   return {
-    // Initial State
-    protocol: 'j1939',
-    baudRate: 250000,
-    isConnected: false,
-    kvaserStatus: 'offline',
-    kvaserDeviceName: null,
-    connectionError: null,
-    theme: 'light',
-    visiblePanels: {
-      deviceManager: false,
-      dbcManager: false,
-      liveViewer: true,
-      livePlotter: false,
-      transmitter: false,
-      diagnostics: false,
-      falseSender: false
-    },
-    panelPositions: {
-      deviceManager: 'sidebar',
-      dbcManager: 'sidebar',
-      liveViewer: 'main-top',
-      livePlotter: 'main-top',
-      transmitter: 'main-bottom',
-      diagnostics: 'main-bottom',
-      falseSender: 'main-bottom'
-    },
-    isEditingLayout: false,
-    panelWidths: {
-      deviceManager: 12,
-      dbcManager: 12,
-      liveViewer: 6,
-      livePlotter: 6,
-      transmitter: 6,
-      diagnostics: 6,
-      falseSender: 12
-    },
-    panelHeights: {
-      deviceManager: 260,
-      dbcManager: 260,
-      liveViewer: 360,
-      livePlotter: 360,
-      transmitter: 260,
-      diagnostics: 260,
-      falseSender: 260
-    },
-    panelOrder: [
-      'deviceManager',
-      'dbcManager',
-      'liveViewer',
-      'livePlotter',
-      'transmitter',
-      'diagnostics',
-      'falseSender'
-    ],
-    activeDragKey: null,
-    dragOverTargetKey: null,
-    dragOverZone: null,
-    dbcs: {
-      'Default J1939 Database': defaultDbcJ1939
-    },
-    activeDbcName: 'Default J1939 Database',
-    devices: [
-      {
-        id: 'dev-1',
-        name: 'Engine Controller',
-        nodeId: 0x01,
-        enabled: true,
-        isSimulated: true,
-        customMessages: []
-      },
-      {
-        id: 'dev-2',
-        name: 'Transmission Controller',
-        nodeId: 0x03,
-        enabled: true,
-        isSimulated: true,
-        customMessages: []
-      }
-    ],
-    projectSettings: {
-      name: 'Default Project',
-      disabledMessageIds: {},
-      messageNameOverrides: {}
-    },
-    projects: [
-      {
-        id: 'proj-default',
-        name: 'Default Project',
-        protocol: 'j1939',
-        baudRate: 250000,
-        enabled: true,
-        enabledDbcNames: ['Default J1939 Database'],
-        devices: [
-          {
-            id: 'dev-1',
-            name: 'Engine Controller',
-            nodeId: 0x01,
-            enabled: true,
-            isSimulated: true,
-            customMessages: []
-          },
-          {
-            id: 'dev-2',
-            name: 'Transmission Controller',
-            nodeId: 0x03,
-            enabled: true,
-            isSimulated: true,
-            customMessages: []
-          }
-        ],
-        disabledMessageIds: {},
-        messageNameOverrides: {}
-      }
-    ],
-    activeProjectId: 'proj-default',
-    dbcRegistry: BUILT_IN_DBCS.map(db => ({
-      name: db.name,
-      content: db.content,
-      type: db.category === 'generic' ? 'generic' as const : 'device' as const,
-      enabled: db.name === 'Default J1939 Database'
-    })),
-    logs: [],
-    fixedLogs: {},
-    pausedLogs: false,
-    plotSignals: [],
-    plotPoints: [],
-    isSimulating: false,
-    simTime: 0,
-    simulationTimer: null,
-    canopenNodes: {
-      1: createCanopenNode(1),
-      2: createCanopenNode(2)
-    },
-    tpReassembler: new J1939TpReassembler(),
+    ...getInitialState(),
 
     // Actions
     setProtocol: (proto) => {
@@ -702,7 +822,7 @@ export const useStore = create<CanStore>((set, get) => {
       };
     }),
 
-    importDbcToProject: (name, content) => set(state => {
+    importDbcToProject: (name, content, type = 'custom') => set(state => {
       try {
         parseDbc(content);
       } catch (err) {
@@ -713,8 +833,8 @@ export const useStore = create<CanStore>((set, get) => {
 
       const exists = state.dbcRegistry.some(entry => entry.name === name);
       const updatedRegistry = exists
-        ? state.dbcRegistry.map(entry => entry.name === name ? { ...entry, content, type: 'custom' as const } : entry)
-        : [...state.dbcRegistry, { name, content, type: 'custom' as const, enabled: true }];
+        ? state.dbcRegistry.map(entry => entry.name === name ? { ...entry, content, type } : entry)
+        : [...state.dbcRegistry, { name, content, type, enabled: true }];
 
       const activeProj = state.projects.find(p => p.id === state.activeProjectId);
       if (activeProj && !activeProj.enabledDbcNames.includes(name)) {
@@ -806,7 +926,7 @@ export const useStore = create<CanStore>((set, get) => {
       };
     }),
 
-    createEmptyDbc: (name) => set(state => {
+    createEmptyDbc: (name, type = 'custom') => set(state => {
       const trimmed = name.trim();
       if (!trimmed) {
         alert('DBC database name cannot be empty.');
@@ -820,7 +940,7 @@ export const useStore = create<CanStore>((set, get) => {
       const newEntry = {
         name: trimmed,
         content: `BU_: Master Node\n`,
-        type: 'custom' as const,
+        type,
         enabled: true
       };
 
@@ -895,21 +1015,18 @@ export const useStore = create<CanStore>((set, get) => {
           }
           return proj;
         }),
-        customDbcs
+        customDbcs,
+        dbcRegistry: state.dbcRegistry.map(entry => ({
+          name: entry.name,
+          content: entry.content,
+          type: entry.type,
+          enabled: entry.enabled
+        }))
       };
 
       const json = JSON.stringify(payload, null, 2);
-      if (typeof document !== 'undefined') {
-        const blob = new Blob([json], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${state.projectSettings.name.replace(/\s+/g, '_')}.smartcan`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
+      const filename = `${state.projectSettings.name.replace(/\s+/g, '_')}.smartcan`;
+      saveTextFile(filename, json, [{ name: 'SmartCAN Project', extensions: ['smartcan'] }]);
     },
 
     loadSmartCanFile: (jsonContent) => {
@@ -922,26 +1039,35 @@ export const useStore = create<CanStore>((set, get) => {
           throw new Error('No projects found in file');
         }
 
-        const baseRegistry = BUILT_IN_DBCS.map(db => ({
-          name: db.name,
-          content: db.content,
-          type: db.category === 'generic' ? 'generic' as const : 'device' as const,
-          enabled: false
-        }));
-
-        const fileCustomDbcs = Array.isArray(parsed.customDbcs) ? parsed.customDbcs : [];
-        const restoredRegistry = [
-          ...baseRegistry,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ...fileCustomDbcs.map((db: any) => ({
+        let restoredRegistry: DbcRegistryEntry[] = [];
+        if (Array.isArray(parsed.dbcRegistry)) {
+          restoredRegistry = parsed.dbcRegistry.map((db: any) => ({
+            name: db.name || '',
+            content: db.content || '',
+            type: db.type || 'custom',
+            enabled: db.enabled === true
+          }));
+        } else {
+          // Fallback for older projects
+          const baseRegistry = BUILT_IN_DBCS.map(db => ({
             name: db.name,
             content: db.content,
-            type: 'custom' as const,
+            type: db.category === 'generic' ? 'generic' as const : 'device' as const,
             enabled: false
-          }))
-        ];
+          }));
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const fileCustomDbcs = Array.isArray(parsed.customDbcs) ? parsed.customDbcs : [];
+          restoredRegistry = [
+            ...baseRegistry,
+            ...fileCustomDbcs.map((db: any) => ({
+              name: db.name,
+              content: db.content,
+              type: 'custom' as const,
+              enabled: false
+            }))
+          ];
+        }
+
         const restoredProjects: SmartCanProject[] = parsed.projects.map((proj: any) => ({
           id: proj.id || 'proj-' + Math.random().toString(36).substr(2, 9),
           name: proj.name || 'Unnamed Project',
@@ -949,7 +1075,7 @@ export const useStore = create<CanStore>((set, get) => {
           baudRate: Number(proj.baudRate) || 250000,
           enabled: proj.enabled !== false,
           enabledDbcNames: Array.isArray(proj.enabledDbcNames) ? proj.enabledDbcNames : [],
-          devices: Array.isArray(proj.devices) ? proj.devices : [],
+          devices: reconstructDevices(proj.devices),
           disabledMessageIds: proj.disabledMessageIds || {},
           messageNameOverrides: proj.messageNameOverrides || {}
         }));
@@ -1000,25 +1126,61 @@ export const useStore = create<CanStore>((set, get) => {
       if (activeProj) {
         activeProj.devices = nextDevices;
       }
-      return { devices: nextDevices, projects: [...state.projects] };
+
+      const nextCanopenNodes = { ...state.canopenNodes };
+      if (state.protocol === 'canopen' && !nextCanopenNodes[device.nodeId]) {
+        nextCanopenNodes[device.nodeId] = createCanopenNode(device.nodeId);
+      }
+
+      return { 
+        devices: nextDevices, 
+        projects: [...state.projects],
+        canopenNodes: nextCanopenNodes
+      };
     }),
 
     updateDevice: (deviceId, updates) => set(state => {
+      const oldDevice = state.devices.find(d => d.id === deviceId);
       const nextDevices = state.devices.map(d => d.id === deviceId ? { ...d, ...updates } : d);
       const activeProj = state.projects.find(p => p.id === state.activeProjectId);
       if (activeProj) {
         activeProj.devices = nextDevices;
       }
-      return { devices: nextDevices, projects: [...state.projects] };
+
+      const nextCanopenNodes = { ...state.canopenNodes };
+      if (state.protocol === 'canopen' && oldDevice) {
+        const newId = updates.nodeId !== undefined ? updates.nodeId : oldDevice.nodeId;
+        if (newId !== oldDevice.nodeId) {
+          delete nextCanopenNodes[oldDevice.nodeId];
+          nextCanopenNodes[newId] = createCanopenNode(newId);
+        }
+      }
+
+      return { 
+        devices: nextDevices, 
+        projects: [...state.projects],
+        canopenNodes: nextCanopenNodes
+      };
     }),
 
     removeDevice: (deviceId) => set(state => {
+      const oldDevice = state.devices.find(d => d.id === deviceId);
       const nextDevices = state.devices.filter(d => d.id !== deviceId);
       const activeProj = state.projects.find(p => p.id === state.activeProjectId);
       if (activeProj) {
         activeProj.devices = nextDevices;
       }
-      return { devices: nextDevices, projects: [...state.projects] };
+
+      const nextCanopenNodes = { ...state.canopenNodes };
+      if (state.protocol === 'canopen' && oldDevice) {
+        delete nextCanopenNodes[oldDevice.nodeId];
+      }
+
+      return { 
+        devices: nextDevices, 
+        projects: [...state.projects],
+        canopenNodes: nextCanopenNodes
+      };
     }),
 
     addCustomMessage: (deviceId, message) => set(state => {
@@ -1094,8 +1256,8 @@ export const useStore = create<CanStore>((set, get) => {
     addLog: (frame) => {
       const state = get();
       
-      // If the log is paused or message is disabled globally, do not register
-      if (state.pausedLogs || state.projectSettings.disabledMessageIds[frame.id]) {
+      // If the log is paused, layout is editing, or message is disabled globally, do not register
+      if (state.pausedLogs || state.isEditingLayout || state.projectSettings.disabledMessageIds[frame.id]) {
         return;
       }
 
@@ -1267,13 +1429,17 @@ export const useStore = create<CanStore>((set, get) => {
           [newLog.id]: newLog
         };
         
-        return { logs: nextLogs, fixedLogs: nextFixedLogs };
+        return { 
+          logs: nextLogs, 
+          fixedLogs: nextFixedLogs,
+          totalFramesReceived: state.totalFramesReceived + 1
+        };
       });
     },
 
     clearLogs: () => {
       Object.keys(lastTimestampsById).forEach(key => delete lastTimestampsById[Number(key)]);
-      set({ logs: [], fixedLogs: {}, plotPoints: [] });
+      set({ logs: [], fixedLogs: {}, plotPoints: [], totalFramesReceived: 0 });
     },
     
     setPausedLogs: (pausedLogs) => set({ pausedLogs }),
@@ -1630,7 +1796,7 @@ export const useStore = create<CanStore>((set, get) => {
           } else {
             // CANopen Simulated Node Traffic
             const openNode = currentState.canopenNodes[device.nodeId];
-            if (openNode && openNode.nmtState !== 'STOPPED') {
+            if (openNode && device.enabled && openNode.nmtState !== 'STOPPED') {
               
               const ticks = Math.floor(nextTime / 50);
               const hbTicks = Math.floor(openNode.heartbeatInterval / 50);
@@ -1717,3 +1883,44 @@ declare global {
 if (typeof window !== 'undefined') {
   window.__store = useStore;
 }
+
+// Subscribe to store changes to persist to localStorage
+useStore.subscribe((state) => {
+  if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
+    try {
+      const persistedState = {
+        activeProjectId: state.activeProjectId,
+        projects: state.projects.map(proj => {
+          if (proj.id === state.activeProjectId) {
+            return {
+              ...proj,
+              protocol: state.protocol,
+              baudRate: state.baudRate,
+              devices: state.devices,
+              disabledMessageIds: state.projectSettings.disabledMessageIds,
+              messageNameOverrides: state.projectSettings.messageNameOverrides
+            };
+          }
+          return proj;
+        }),
+        dbcRegistry: state.dbcRegistry.map(entry => ({
+          name: entry.name,
+          content: entry.content,
+          type: entry.type,
+          enabled: entry.enabled
+        })),
+        protocol: state.protocol,
+        baudRate: state.baudRate,
+        theme: state.theme,
+        visiblePanels: state.visiblePanels,
+        panelPositions: state.panelPositions,
+        panelWidths: state.panelWidths,
+        panelHeights: state.panelHeights,
+        panelOrder: state.panelOrder
+      };
+      localStorage.setItem('smartcan_state_v1', JSON.stringify(persistedState));
+    } catch (e) {
+      console.error('Failed to save state to localStorage:', e);
+    }
+  }
+});

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **OneDrive & Project Persistence**: Integrated complete project saving/loading (including `dbcRegistry` and logical devices) with OneDrive support.
+- **Custom Device Templates**: Option to create new device templates directly under DBC Manager.
+- **Logical ECU Tree**: Added a logical ECU tree to the default left panel view, which stretches to full height.
+- **DBC Exporting**: Added an Export button next to DBC rows to save individual DBC files separately.
+- **Custom Message Editing**: Added an "Edit" button next to custom messages and simplified programming message signals.
+- **Visual Signal Indicators**: Signal forms now render with visual min/max and unit indicators, dynamically encoding signal values to hex payload data.
+
+### Fixed
+- **DBC Editing & Validation**: Improved DBC editing flow, including a local input state for decimal/negative values, and verification check on "Save DBC Configuration" (eliminating raw alerts).
+- **Logical Device Toggle**: Fixed issue with turning logical devices on/off not working.
+- **Performance Optimization**: Automatically pause CAN frame UI rendering/processing during layout editing mode to reduce lag.
+- **Frames Counter**: Re-implemented frames counter in the top-right to scale correctly using `totalFramesReceived`.
+- **Header Responsive Layout**: Optimized header navigation bar with a premium aesthetic, replacing text labels and status flags with tooltips/icons on laptop screens, adding custom select chevrons, and matching header background with the active theme colors.
+
 ## [0.0.5] - 2026-06-05
 
 ### Fixed

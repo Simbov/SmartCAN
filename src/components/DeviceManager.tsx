@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
-import { Cpu, Plus, ToggleLeft, ToggleRight, Trash2, Sliders, EyeOff } from 'lucide-react';
+import { Cpu, Plus, ToggleLeft, ToggleRight, Trash2, Sliders, EyeOff, Edit } from 'lucide-react';
+import { encodeFrame, decodeFrame } from '../lib/dbcParser';
 
 export const DeviceManager: React.FC = () => {
   const {
@@ -9,6 +10,7 @@ export const DeviceManager: React.FC = () => {
     updateDevice,
     removeDevice,
     addCustomMessage,
+    updateCustomMessage,
     removeCustomMessage,
     dbcs,
     activeDbcName,
@@ -23,6 +25,10 @@ export const DeviceManager: React.FC = () => {
   
   // Custom message creation form state
   const [targetDevId, setTargetDevId] = useState<string | null>(null);
+  const [editingMsg, setEditingMsg] = useState<any | null>(null);
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string>('');
+  const [signalValues, setSignalValues] = useState<Record<string, number>>({});
+
   const [msgHexId, setMsgHexId] = useState('180');
   const [msgName, setMsgName] = useState('CustomPDO');
   const [msgDlc, setMsgDlc] = useState(8);
@@ -48,12 +54,143 @@ export const DeviceManager: React.FC = () => {
     setNewDevNodeId(prev => prev + 1);
   };
 
+  const handleTemplateChange = (key: string) => {
+    setSelectedTemplateKey(key);
+    if (!key) {
+      setSignalValues({});
+      return;
+    }
+
+    const [dbcName, msgIdStr] = key.split('|');
+    const msgId = parseInt(msgIdStr, 10);
+    const templateDbc = dbcs[dbcName];
+    const templateMsg = templateDbc?.messages[msgId];
+
+    if (templateMsg) {
+      setMsgName(templateMsg.name);
+      setMsgHexId(templateMsg.id.toString(16).toUpperCase());
+      setMsgDlc(templateMsg.dlc || 8);
+
+      // Initialize signal values
+      const initVals: Record<string, number> = {};
+      templateMsg.signals.forEach(sig => {
+        initVals[sig.name] = Math.max(sig.min, Math.min(sig.max, 0));
+      });
+      setSignalValues(initVals);
+
+      // Encode payload
+      const encoded = encodeFrame(msgId, initVals, templateDbc);
+      if (encoded) {
+        const hex = Array.from(encoded).map(b => b.toString(16).padStart(2, '0')).join('');
+        setMsgDataHex(hex);
+      }
+    }
+  };
+
+  const handleSignalValueChange = (sigName: string, valueStr: string) => {
+    const num = parseFloat(valueStr);
+    const val = isNaN(num) ? 0 : num;
+    const nextVals = {
+      ...signalValues,
+      [sigName]: val
+    };
+    setSignalValues(nextVals);
+
+    // Re-encode
+    if (selectedTemplateKey) {
+      const [dbcName, msgIdStr] = selectedTemplateKey.split('|');
+      const msgId = parseInt(msgIdStr, 10);
+      const templateDbc = dbcs[dbcName];
+      if (templateDbc) {
+        const encoded = encodeFrame(msgId, nextVals, templateDbc);
+        if (encoded) {
+          const hex = Array.from(encoded).map(b => b.toString(16).padStart(2, '0')).join('');
+          setMsgDataHex(hex);
+        }
+      }
+    }
+  };
+
+  const handleHexPayloadChange = (hexStr: string) => {
+    setMsgDataHex(hexStr);
+    
+    // If template is active, try to decode the entered hex back into signals
+    if (selectedTemplateKey) {
+      const [dbcName, msgIdStr] = selectedTemplateKey.split('|');
+      const msgId = parseInt(msgIdStr, 10);
+      const templateDbc = dbcs[dbcName];
+      if (templateDbc) {
+        const cleanHex = hexStr.replace(/\s+/g, '');
+        const dataBytes = new Uint8Array(
+          (cleanHex.match(/.{1,2}/g) || []).map(b => parseInt(b, 16) || 0)
+        );
+        const paddedBytes = new Uint8Array(msgDlc);
+        paddedBytes.set(dataBytes.slice(0, msgDlc));
+
+        const decoded = decodeFrame(msgId, paddedBytes, templateDbc);
+        if (decoded) {
+          setSignalValues(decoded);
+        }
+      }
+    }
+  };
+
+  const handleOpenEditModal = (devId: string, msg: any) => {
+    setTargetDevId(devId);
+    setEditingMsg(msg);
+    setMsgHexId(msg.id.toString(16).toUpperCase());
+    setMsgName(msg.name);
+    setMsgDlc(msg.dlc);
+    setMsgInterval(msg.interval);
+
+    const hex = Array.from(msg.data as Uint8Array).map(b => b.toString(16).padStart(2, '0')).join('');
+    setMsgDataHex(hex);
+
+    if (msg.templateKey) {
+      setSelectedTemplateKey(msg.templateKey);
+      const [dbcName, msgIdStr] = msg.templateKey.split('|');
+      const msgId = parseInt(msgIdStr, 10);
+      const templateDbc = dbcs[dbcName];
+      const templateMsg = templateDbc?.messages[msgId];
+      const initVals: Record<string, number> = {};
+      if (templateMsg) {
+        templateMsg.signals.forEach(sig => {
+          initVals[sig.name] = msg.signals && msg.signals[sig.name] !== undefined 
+            ? msg.signals[sig.name] 
+            : Math.max(sig.min, Math.min(sig.max, 0));
+        });
+      }
+      setSignalValues(initVals);
+    } else {
+      setSelectedTemplateKey('');
+      setSignalValues({});
+    }
+  };
+
+  const handleCancelModal = () => {
+    setTargetDevId(null);
+    setEditingMsg(null);
+    setSelectedTemplateKey('');
+    setSignalValues({});
+    setMsgHexId('180');
+    setMsgName('CustomPDO');
+    setMsgDlc(8);
+    setMsgDataHex('0000000000000000');
+    setMsgInterval(500);
+  };
+
   const handleCreateCustomMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!targetDevId) return;
 
-    const id = parseInt(msgHexId, 16);
-    if (isNaN(id)) return;
+    let id = parseInt(msgHexId, 16);
+    if (isNaN(id)) {
+      id = parseInt(msgHexId, 10);
+    }
+    if (isNaN(id)) {
+      alert('Invalid CAN Identifier.');
+      return;
+    }
 
     // Convert hex payload string into Uint8Array
     const cleanHex = msgDataHex.replace(/\s+/g, '');
@@ -65,22 +202,41 @@ export const DeviceManager: React.FC = () => {
     const finalData = new Uint8Array(msgDlc);
     finalData.set(dataBytes.slice(0, msgDlc));
 
-    addCustomMessage(targetDevId, {
-      id,
-      name: msgName || `Msg_0x${msgHexId}`,
-      dlc: msgDlc,
-      data: finalData,
-      interval: msgInterval,
-      enabled: true
-    });
+    const dev = devices.find(d => d.id === targetDevId);
+    if (!dev) return;
 
-    // Reset Form
-    setTargetDevId(null);
-    setMsgHexId('180');
-    setMsgName('CustomPDO');
-    setMsgDlc(8);
-    setMsgDataHex('0000000000000000');
-    setMsgInterval(500);
+    if (editingMsg) {
+      if (id !== editingMsg.id && dev.customMessages.some(m => m.id === id)) {
+        alert(`A custom message with ID 0x${id.toString(16).toUpperCase()} already exists.`);
+        return;
+      }
+      updateCustomMessage(targetDevId, editingMsg.id, {
+        id,
+        name: msgName || `Msg_0x${msgHexId}`,
+        dlc: msgDlc,
+        data: finalData,
+        interval: msgInterval,
+        signals: selectedTemplateKey ? signalValues : undefined,
+        templateKey: selectedTemplateKey || undefined
+      });
+    } else {
+      if (dev.customMessages.some(m => m.id === id)) {
+        alert(`A custom message with ID 0x${id.toString(16).toUpperCase()} already exists.`);
+        return;
+      }
+      addCustomMessage(targetDevId, {
+        id,
+        name: msgName || `Msg_0x${msgHexId}`,
+        dlc: msgDlc,
+        data: finalData,
+        interval: msgInterval,
+        enabled: true,
+        signals: selectedTemplateKey ? signalValues : undefined,
+        templateKey: selectedTemplateKey || undefined
+      });
+    }
+
+    handleCancelModal();
   };
 
   // Collect all known message IDs across loaded DBC and devices
@@ -235,15 +391,22 @@ export const DeviceManager: React.FC = () => {
                   ) : (
                     dev.customMessages.map(msg => (
                       <div key={msg.id} className="flex justify-between items-center text-[10px] bg-[var(--bg-input)] border border-[var(--border-sub)] px-2 py-1 rounded">
-                        <div className="flex items-center gap-1.5 truncate max-w-[150px]">
-                          <span className="font-mono text-[var(--text-muted)]">0x{msg.id.toString(16).toUpperCase()}</span>
+                        <div className="flex items-center gap-1.5 truncate max-w-[120px]">
+                          <span className="font-mono text-[var(--text-muted)] font-semibold">0x{msg.id.toString(16).toUpperCase()}</span>
                           <span className="text-[var(--text-color)] truncate" title={msg.name}>{msg.name}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-[var(--text-muted)]">{msg.interval}ms</span>
+                          <span className="text-[var(--text-muted)] font-mono">{msg.interval}ms</span>
+                          <button
+                            onClick={() => handleOpenEditModal(dev.id, msg)}
+                            className="text-[var(--text-muted)] hover:text-cyber-accent"
+                            title="Edit Custom Message"
+                          >
+                            <Edit className="w-3 h-3" />
+                          </button>
                           <button
                             onClick={() => removeCustomMessage(dev.id, msg.id)}
-                            className="text-[var(--text-muted)] hover:text-red-500 font-bold"
+                            className="text-[var(--text-muted)] hover:text-red-500 font-bold text-xs"
                           >
                             ×
                           </button>
@@ -260,8 +423,30 @@ export const DeviceManager: React.FC = () => {
           {targetDevId && (
             <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="glass-panel p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-                <h3 className="text-sm font-bold text-[var(--text-color)] mb-4">Add Custom Message to Device</h3>
+                <h3 className="text-sm font-bold text-[var(--text-color)] mb-4">
+                  {editingMsg ? 'Edit Custom Message' : 'Add Custom Message to Device'}
+                </h3>
                 <form onSubmit={handleCreateCustomMessage} className="space-y-3.5">
+                  <div>
+                    <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">DBC Message Template</label>
+                    <select
+                      value={selectedTemplateKey}
+                      onChange={e => handleTemplateChange(e.target.value)}
+                      className="glass-input w-full text-xs"
+                    >
+                      <option value="">-- Custom Message (No Template) --</option>
+                      {Object.entries(dbcs).map(([dbcName, db]) => (
+                        <optgroup key={dbcName} label={dbcName}>
+                          {Object.values(db.messages).map(msg => (
+                            <option key={`${dbcName}|${msg.id}`} value={`${dbcName}|${msg.id}`}>
+                              {msg.name} (0x{msg.id.toString(16).toUpperCase()})
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </div>
+
                   <div>
                     <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">CAN Identifier (Hex)</label>
                     <input
@@ -307,12 +492,47 @@ export const DeviceManager: React.FC = () => {
                       />
                     </div>
                   </div>
+
+                  {(() => {
+                    if (!selectedTemplateKey) return null;
+                    const [dbcName, msgIdStr] = selectedTemplateKey.split('|');
+                    const msgId = parseInt(msgIdStr, 10);
+                    const templateMsg = dbcs[dbcName]?.messages[msgId];
+                    if (!templateMsg || !templateMsg.signals || templateMsg.signals.length === 0) return null;
+                    
+                    return (
+                      <div className="space-y-2 max-h-40 overflow-y-auto p-2 bg-[var(--bg-input)] rounded border border-[var(--border-sub)]">
+                        <div className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Signals (Physical values)</div>
+                        {templateMsg.signals.map(sig => {
+                          const val = signalValues[sig.name] !== undefined ? signalValues[sig.name] : Math.max(sig.min, Math.min(sig.max, 0));
+                          return (
+                            <div key={sig.name} className="flex flex-col gap-0.5">
+                              <div className="flex justify-between text-[9px]">
+                                <span className="font-semibold text-[var(--text-color)]">{sig.name}</span>
+                                <span className="text-[var(--text-muted)]">
+                                  [{sig.min}, {sig.max}] {sig.unit}
+                                </span>
+                              </div>
+                              <input
+                                type="number"
+                                step="any"
+                                value={val}
+                                onChange={e => handleSignalValueChange(sig.name, e.target.value)}
+                                className="glass-input py-0.5 px-2 text-[11px] w-full"
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+
                   <div>
                     <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">Hex Payload Data</label>
                     <input
                       type="text"
                       value={msgDataHex}
-                      onChange={e => setMsgDataHex(e.target.value)}
+                      onChange={e => handleHexPayloadChange(e.target.value)}
                       placeholder="0011223344556677"
                       className="glass-input w-full text-xs font-mono"
                       required
@@ -322,7 +542,7 @@ export const DeviceManager: React.FC = () => {
                   <div className="flex gap-2.5 pt-2">
                     <button
                       type="button"
-                      onClick={() => setTargetDevId(null)}
+                      onClick={handleCancelModal}
                       className="flex-1 glass-button"
                     >
                       Cancel
@@ -331,7 +551,7 @@ export const DeviceManager: React.FC = () => {
                       type="submit"
                       className="flex-1 bg-cyber-accent border border-cyber-accent/40 text-black hover:bg-emerald-400 text-xs font-bold rounded py-1.5 active:scale-95"
                     >
-                      Save Message
+                      {editingMsg ? 'Save Changes' : 'Save Message'}
                     </button>
                   </div>
                 </form>

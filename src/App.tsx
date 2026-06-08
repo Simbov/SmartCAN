@@ -360,7 +360,7 @@ const App: React.FC = () => {
           </div>
         ) : (
           <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-            <div className={`flex-1 overflow-auto grid ${mainGridCols} gap-4 p-4 min-h-0`}>
+            <div className={`flex-1 ${isEditingLayout ? 'overflow-auto' : 'overflow-hidden'} grid ${mainGridCols} gap-4 p-4 min-h-0`}>
               {/* Sidebar zone */}
               {hasSidebar || isEditingLayout ? (
                 <section
@@ -376,20 +376,27 @@ const App: React.FC = () => {
                   }`}
                   style={{ minWidth: isEditingLayout && !hasSidebar ? '300px' : 'auto' }}
                 >
-                  {sidebarKeys.map(key => (
-                    <div
-                      key={key}
-                      className="overflow-hidden shrink-0"
-                      style={{
-                        height: panelHeights[key] ? `${panelHeights[key]}px` : 'auto',
-                        minHeight: '120px'
-                      }}
-                    >
-                      <PanelContainer panelKey={key}>
-                        {PANEL_COMPONENTS[key]}
-                      </PanelContainer>
-                    </div>
-                  ))}
+                  {sidebarKeys.map(key => {
+                    const isSingleInSidebar = sidebarKeys.length === 1;
+                    const style = (!isEditingLayout && isSingleInSidebar)
+                      ? { height: '100%', flex: '1 1 auto' }
+                      : {
+                          height: panelHeights[key] ? `${panelHeights[key]}px` : 'auto',
+                          minHeight: '120px',
+                          flexShrink: 0
+                        };
+                    return (
+                      <div
+                        key={key}
+                        className="overflow-hidden"
+                        style={style}
+                      >
+                        <PanelContainer panelKey={key}>
+                          {PANEL_COMPONENTS[key]}
+                        </PanelContainer>
+                      </div>
+                    );
+                  })}
                   {isEditingLayout && sidebarKeys.length === 0 && (
                     <div className="flex-1 flex items-center justify-center text-center p-4 border border-dashed border-[var(--border-color)] rounded-lg text-[10px] text-[var(--text-muted)] italic">
                       Drag panels here to place in Sidebar
