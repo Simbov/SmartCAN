@@ -106,6 +106,7 @@ interface CanStore {
   panelWidths: Record<string, number>;
   panelHeights: Record<string, number>;
   panelOrder: string[];
+  liveViewerMode: 'scroll' | 'fixed';
   activeDragKey: string | null;
   dragOverTargetKey: string | null;
   dragOverZone: 'sidebar' | 'main-top' | 'main-bottom' | null;
@@ -151,6 +152,7 @@ interface CanStore {
   setPanelWidth: (panelName: string, width: number) => void;
   setPanelHeight: (panelName: string, height: number) => void;
   setPanelOrder: (order: string[]) => void;
+  setLiveViewerMode: (mode: 'scroll' | 'fixed') => void;
   setActiveDragKey: (key: string | null) => void;
   setDragOverTargetKey: (key: string | null) => void;
   setDragOverZone: (zone: 'sidebar' | 'main-top' | 'main-bottom' | null) => void;
@@ -308,6 +310,7 @@ const getInitialState = () => {
       'diagnostics',
       'falseSender'
     ],
+    liveViewerMode: 'scroll' as const,
     dragOverZone: null as 'sidebar' | 'main-top' | 'main-bottom' | null,
     activeDragKey: null as string | null,
     dragOverTargetKey: null as string | null,
@@ -609,6 +612,7 @@ export const useStore = create<CanStore>((set, get) => {
     })),
 
     setPanelOrder: (panelOrder) => set({ panelOrder }),
+    setLiveViewerMode: (liveViewerMode) => set({ liveViewerMode }),
     setActiveDragKey: (activeDragKey) => set({ activeDragKey }),
     setDragOverTargetKey: (dragOverTargetKey) => set({ dragOverTargetKey }),
     setDragOverZone: (dragOverZone) => set({ dragOverZone }),
@@ -1916,7 +1920,8 @@ useStore.subscribe((state) => {
         panelPositions: state.panelPositions,
         panelWidths: state.panelWidths,
         panelHeights: state.panelHeights,
-        panelOrder: state.panelOrder
+        panelOrder: state.panelOrder,
+        liveViewerMode: state.liveViewerMode
       };
       localStorage.setItem('smartcan_state_v1', JSON.stringify(persistedState));
     } catch (e) {

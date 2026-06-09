@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from '../store/useStore';
 import { Cpu, Plus, ToggleLeft, ToggleRight, Trash2, Sliders, EyeOff, Edit } from 'lucide-react';
 import { encodeFrame, decodeFrame } from '../lib/dbcParser';
@@ -420,7 +421,7 @@ export const DeviceManager: React.FC = () => {
           </div>
 
           {/* Modal Custom Message Creator Form */}
-          {targetDevId && (
+          {targetDevId && createPortal(
             <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="glass-panel p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
                 <h3 className="text-sm font-bold text-[var(--text-color)] mb-4">
@@ -556,7 +557,8 @@ export const DeviceManager: React.FC = () => {
                   </div>
                 </form>
               </div>
-            </div>
+            </div>,
+            document.body
           )}
         </div>
       ) : (

@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from '../store/useStore';
 import type { CanLog } from '../store/useStore';
 import { Play, Pause, Trash2, Download, Upload, Filter, ChevronDown, ChevronRight, Eye, Plus, ArrowUp, ArrowDown, SlidersHorizontal, RotateCcw, Activity, Binary } from 'lucide-react';
@@ -20,7 +21,9 @@ export const LiveViewer: React.FC = () => {
     devices,
     saveMessageToActiveDbc,
     dbcs,
-    activeDbcName
+    activeDbcName,
+    liveViewerMode: viewMode,
+    setLiveViewerMode: setViewMode
   } = useStore();
 
   const [filterText, setFilterText] = useState('');
@@ -69,7 +72,6 @@ export const LiveViewer: React.FC = () => {
   };
   
   // Columns and View Modes Config
-  const [viewMode, setViewMode] = useState<'scroll' | 'fixed'>('scroll');
   const [showColumnDropdown, setShowColumnDropdown] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
     time: true,
@@ -94,7 +96,7 @@ export const LiveViewer: React.FC = () => {
   // Unrecognized message save form state
   const [unrecognizedMsg, setUnrecognizedMsg] = useState<{ id: number; dlc: number } | null>(null);
   const [newMsgName, setNewMsgName] = useState('');
-  const [newMsgSender, setNewMsgSender] = useState('Vector_XXX');
+  const [newMsgSender, setNewMsgSender] = useState('Vector__XXX');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -388,7 +390,7 @@ export const LiveViewer: React.FC = () => {
     saveMessageToActiveDbc(unrecognizedMsg.id, newMsgName.trim(), unrecognizedMsg.dlc, newMsgSender.trim());
     setUnrecognizedMsg(null);
     setNewMsgName('');
-    setNewMsgSender('Vector_XXX');
+    setNewMsgSender('Vector__XXX');
   };
 
   const parseLinuxCanDump = (text: string) => {
@@ -1041,7 +1043,7 @@ export const LiveViewer: React.FC = () => {
         </table>
       </div>
 
-      {unrecognizedMsg && (
+      {unrecognizedMsg && createPortal(
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="glass-panel p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
             <h3 className="text-sm font-bold text-[var(--text-color)] mb-4">Add Unrecognized Message to DBC</h3>
@@ -1056,7 +1058,7 @@ export const LiveViewer: React.FC = () => {
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">Sender Node</label>
-                <input type="text" value={newMsgSender} onChange={e => setNewMsgSender(e.target.value)} className="glass-input w-full text-xs" placeholder="e.g. Vector_XXX" required />
+                <input type="text" value={newMsgSender} onChange={e => setNewMsgSender(e.target.value)} className="glass-input w-full text-xs" placeholder="e.g. Vector__XXX" required />
               </div>
               <div className="flex gap-2.5 pt-2">
                 <button type="button" onClick={() => setUnrecognizedMsg(null)} className="flex-1 glass-button text-xs">Cancel</button>
@@ -1064,7 +1066,8 @@ export const LiveViewer: React.FC = () => {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

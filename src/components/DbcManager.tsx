@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore';
 import { parseDbc } from '../lib/dbcParser';
 import type { DbcSignal } from '../lib/dbcParser';
 import { serializeDbc } from '../lib/dbcSerializer';
+import { buildJ1939Id, parseJ1939Id } from '../lib/j1939';
 import {
   Database,
   ShieldAlert,
@@ -28,6 +29,7 @@ export const DbcManager: React.FC = () => {
     activeProjectId,
     dbcRegistry,
     dbcs,
+    protocol,
     addProject,
     setActiveProject,
     deleteProject,
@@ -201,6 +203,10 @@ export const DbcManager: React.FC = () => {
   const [newMsgId, setNewMsgId] = useState('');
   const [newMsgDlc, setNewMsgDlc] = useState(8);
   const [newMsgSender, setNewMsgSender] = useState('Vector__XXX');
+  const [newMsgPgn, setNewMsgPgn] = useState('');
+  const [newMsgPriority, setNewMsgPriority] = useState(6);
+  const [newMsgSourceAddress, setNewMsgSourceAddress] = useState(0);
+  const [newMsgDestinationAddress, setNewMsgDestinationAddress] = useState(255);
 
   const handleAddNode = () => {
     const trimmed = newNodeName.trim().replace(/\s+/g, '_');
@@ -237,16 +243,37 @@ export const DbcManager: React.FC = () => {
       return;
     }
     
-    let parsedId = parseInt(newMsgId.trim(), 10);
-    if (newMsgId.trim().toLowerCase().startsWith('0x')) {
-      parsedId = parseInt(newMsgId.trim(), 16);
+    let parsedId: number;
+    if (protocol === 'j1939') {
+      let parsedPgn = parseInt(newMsgPgn.trim(), 10);
+      if (newMsgPgn.trim().toLowerCase().startsWith('0x')) {
+        parsedPgn = parseInt(newMsgPgn.trim(), 16);
+      }
+      if (isNaN(parsedPgn) || parsedPgn < 0 || parsedPgn > 0x3FFFF) {
+        alert('PGN must be a valid number (e.g. 61444 or 0xF004).');
+        return;
+      }
+      const sa = Math.max(0, Math.min(253, newMsgSourceAddress));
+      
+      const pf = (parsedPgn >> 8) & 0xFF;
+      const isP2P = pf < 240;
+      const da = isP2P ? Math.max(0, Math.min(255, newMsgDestinationAddress)) : 255;
+      const priority = Math.max(0, Math.min(7, newMsgPriority));
+
+      parsedId = buildJ1939Id(priority, parsedPgn, sa, da);
+    } else {
+      parsedId = parseInt(newMsgId.trim(), 10);
+      if (newMsgId.trim().toLowerCase().startsWith('0x')) {
+        parsedId = parseInt(newMsgId.trim(), 16);
+      }
+      if (isNaN(parsedId) || parsedId < 0) {
+        alert('Message ID must be a valid number (e.g., 256 or 0x100).');
+        return;
+      }
     }
-    if (isNaN(parsedId) || parsedId < 0) {
-      alert('Message ID must be a valid number (e.g., 256 or 0x100).');
-      return;
-    }
+
     if (draftDb.messages[parsedId]) {
-      alert(`A message with ID ${newMsgId} already exists.`);
+      alert(`A message with ID 0x${parsedId.toString(16).toUpperCase()} already exists.`);
       return;
     }
     
@@ -268,6 +295,10 @@ export const DbcManager: React.FC = () => {
     setNewMsgId('');
     setNewMsgDlc(8);
     setNewMsgSender('Vector__XXX');
+    setNewMsgPgn('');
+    setNewMsgPriority(6);
+    setNewMsgSourceAddress(0);
+    setNewMsgDestinationAddress(255);
   };
 
   const handleUpdateMessageHeader = (oldId: number, newId: number, name: string, dlc: number, sender: string) => {
@@ -1035,203 +1066,99 @@ export const DbcManager: React.FC = () => {
                           </div>
                         </div>
                       </div>
-                    )}
+                    )}                    {/* Messages & Signals Sub-Tab */}
+                    {editorSubTab === 'messages' && (() => {
+                      let parsedPgnForDa = parseInt(newMsgPgn.trim(), 10);
+                      if (newMsgPgn.trim().toLowerCase().startsWith('0x')) {
+                        parsedPgnForDa = parseInt(newMsgPgn.trim(), 16);
+                      }
+                      const isP2P = !isNaN(parsedPgnForDa) && ((parsedPgnForDa >> 8) & 0xFF) < 240;
 
-                    {/* Messages & Signals Sub-Tab */}
-                    {editorSubTab === 'messages' && (
-                      <div className="flex-1 flex flex-col gap-4 overflow-hidden">
-                        {editingMsgId === null ? (
-                          /* List of messages + Add Message form */
-                          <div className="flex-1 flex flex-col gap-4 overflow-hidden">
-                            {/* Add Message Form */}
-                            <div className="bg-[var(--bg-card)] border border-[var(--border-sub)] rounded-lg p-3.5 flex-shrink-0 flex flex-col gap-3">
-                              <h4 className="text-xs font-bold text-[var(--text-color)] uppercase tracking-wide">Add New Message Frame</h4>
-                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                <div className="flex flex-col gap-1">
-                                  <label className="text-[10px] text-[var(--text-muted)] font-bold">Message Name</label>
-                                  <input
-                                    type="text"
-                                    placeholder="e.g. Engine_Status"
-                                    value={newMsgName}
-                                    onChange={(e) => setNewMsgName(e.target.value)}
-                                    className="glass-input py-1 px-2 text-xs"
-                                  />
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                  <label className="text-[10px] text-[var(--text-muted)] font-bold">Message ID (Hex or Dec)</label>
-                                  <input
-                                    type="text"
-                                    placeholder="e.g. 0x1F0 or 496"
-                                    value={newMsgId}
-                                    onChange={(e) => setNewMsgId(e.target.value)}
-                                    className="glass-input py-1 px-2 text-xs"
-                                  />
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                  <label className="text-[10px] text-[var(--text-muted)] font-bold">DLC (Bytes)</label>
-                                  <select
-                                    value={newMsgDlc}
-                                    onChange={(e) => setNewMsgDlc(parseInt(e.target.value, 10))}
-                                    className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500/40"
-                                  >
-                                    {[0, 1, 2, 3, 4, 5, 6, 7, 8].map(d => (
-                                      <option key={d} value={d} className="bg-[var(--bg-color)]">{d}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                  <label className="text-[10px] text-[var(--text-muted)] font-bold">Sender Node</label>
-                                  <select
-                                    value={newMsgSender}
-                                    onChange={(e) => setNewMsgSender(e.target.value)}
-                                    className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500/40"
-                                  >
-                                    <option value="Vector__XXX" className="bg-[var(--bg-color)]">Vector__XXX (None)</option>
-                                    {draftDb.nodes.map(n => (
-                                      <option key={n} value={n} className="bg-[var(--bg-color)]">{n}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                              </div>
-                              <button
-                                onClick={handleAddMessage}
-                                className="w-full py-1.5 bg-sky-500 hover:bg-sky-600 text-white rounded text-xs font-semibold flex items-center justify-center gap-1.5"
-                              >
-                                <Plus className="w-3.5 h-3.5" /> Add Message Frame
-                              </button>
-                            </div>
-
-                            {/* Messages List Table */}
-                            <div className="flex-1 overflow-y-auto border border-[var(--border-sub)] rounded-lg bg-[var(--bg-card)]/40">
-                              <table className="w-full text-left text-xs border-collapse">
-                                <thead>
-                                  <tr className="bg-[var(--bg-card-sub)] border-b border-[var(--border-sub)] text-[var(--text-muted)] font-semibold">
-                                    <th className="p-2.5 font-bold">ID (Hex)</th>
-                                    <th className="p-2.5 font-bold">Name</th>
-                                    <th className="p-2.5 font-bold">DLC</th>
-                                    <th className="p-2.5 font-bold">Sender</th>
-                                    <th className="p-2.5 font-bold">Signals</th>
-                                    <th className="p-2.5 font-bold text-right">Actions</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {Object.values(draftDb.messages).map(msg => (
-                                    <tr
-                                      key={msg.id}
-                                      className="border-b border-[var(--border-sub)] hover:bg-[var(--bg-input)]/50 transition-colors"
-                                    >
-                                      <td className="p-2.5 font-mono text-[var(--text-muted)]">0x{msg.id.toString(16).toUpperCase()}</td>
-                                      <td className="p-2.5 font-bold text-[var(--text-color)]">{msg.name}</td>
-                                      <td className="p-2.5">{msg.dlc} B</td>
-                                      <td className="p-2.5 font-semibold">{msg.sender}</td>
-                                      <td className="p-2.5">
-                                        <span className="bg-sky-500/10 text-sky-600 dark:text-sky-400 px-1.5 py-0.5 rounded text-[10px] font-bold">
-                                          {msg.signals.length} sigs
-                                        </span>
-                                      </td>
-                                      <td className="p-2.5 text-right flex justify-end gap-1.5">
-                                        <button
-                                          onClick={() => setEditingMsgId(msg.id)}
-                                          className="px-2 py-1 rounded border border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400 hover:bg-sky-500/20 text-[10px] font-bold"
-                                        >
-                                          Edit Signals
-                                        </button>
-                                        <button
-                                          onClick={() => {
-                                            const updatedMessages = { ...draftDb.messages };
-                                            delete updatedMessages[msg.id];
-                                            setDraftDb({ ...draftDb, messages: updatedMessages });
-                                          }}
-                                          className="p-1 rounded text-red-500 hover:bg-red-500/10 transition-colors"
-                                          title="Delete Message"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                  {Object.keys(draftDb.messages).length === 0 && (
-                                    <tr>
-                                      <td colSpan={6} className="p-8 text-center text-[var(--text-muted)] italic">
-                                        No messages defined. Add one above to start defining signals.
-                                      </td>
-                                    </tr>
-                                  )}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        ) : (
-                          /* Message Detail Editor (Form + Signals Table) */
-                          (() => {
-                            const currentMsg = draftDb.messages[editingMsgId];
-                            if (!currentMsg) {
-                              setEditingMsgId(null);
-                              return null;
-                            }
-                            return (
-                              <div className="flex-1 flex flex-col gap-4 overflow-hidden">
-                                {/* Header with back button */}
-                                <div className="flex items-center justify-between border-b border-[var(--border-sub)] pb-2 flex-shrink-0">
-                                  <button
-                                    onClick={() => setEditingMsgId(null)}
-                                    className="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-1"
-                                  >
-                                    &larr; Back to Message List
-                                  </button>
-                                  <h4 className="text-xs font-bold text-[var(--text-color)]">
-                                    Editing: {currentMsg.name} (0x{currentMsg.id.toString(16).toUpperCase()})
-                                  </h4>
-                                </div>
-
-                                {/* Edit Message Form header */}
-                                <div className="bg-[var(--bg-card)] border border-[var(--border-sub)] rounded-lg p-3 grid grid-cols-2 md:grid-cols-4 gap-3 flex-shrink-0">
-                                  <div className="flex flex-col gap-1">
+                      return (
+                        <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+                          {editingMsgId === null ? (
+                            /* List of messages + Add Message form */
+                            <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+                              {/* Add Message Form */}
+                              <div className="bg-[var(--bg-card)] border border-[var(--border-sub)] rounded-lg p-3.5 flex-shrink-0 flex flex-col gap-3">
+                                <h4 className="text-xs font-bold text-[var(--text-color)] uppercase tracking-wide">Add New Message Frame</h4>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                  <div className="flex flex-col gap-1 col-span-2">
                                     <label className="text-[10px] text-[var(--text-muted)] font-bold">Message Name</label>
                                     <input
                                       type="text"
-                                      value={getLocalValue(`${currentMsg.id}-name`, currentMsg.name)}
-                                      onChange={(e) => handleLocalChange(`${currentMsg.id}-name`, e.target.value)}
-                                      onBlur={() => handleLocalBlur(
-                                        `${currentMsg.id}-name`,
-                                        (v) => v.trim().replace(/\s+/g, '_'),
-                                        (v) => {
-                                          if (v) handleUpdateMessageHeader(currentMsg.id, currentMsg.id, v, currentMsg.dlc, currentMsg.sender);
-                                        }
-                                      )}
-                                      className="glass-input py-1 px-2 text-xs"
+                                      placeholder="e.g. Engine_Status"
+                                      value={newMsgName}
+                                      onChange={(e) => setNewMsgName(e.target.value)}
+                                      className="glass-input py-1 px-2 text-xs w-full"
                                     />
                                   </div>
-                                  <div className="flex flex-col gap-1">
-                                    <label className="text-[10px] text-[var(--text-muted)] font-bold">Message ID (Hex or Dec)</label>
-                                    <input
-                                      type="text"
-                                      value={getLocalValue(`${currentMsg.id}-id`, `0x${currentMsg.id.toString(16).toUpperCase()}`)}
-                                      onChange={(e) => handleLocalChange(`${currentMsg.id}-id`, e.target.value)}
-                                      onBlur={() => handleLocalBlur(
-                                        `${currentMsg.id}-id`,
-                                        (v) => {
-                                          let val = parseInt(v.trim(), 10);
-                                          if (v.trim().toLowerCase().startsWith('0x')) {
-                                            val = parseInt(v.trim(), 16);
-                                          }
-                                          return isNaN(val) ? currentMsg.id : val;
-                                        },
-                                        (val) => {
-                                          if (val !== currentMsg.id) {
-                                            handleUpdateMessageHeader(currentMsg.id, val, currentMsg.name, currentMsg.dlc, currentMsg.sender);
-                                          }
-                                        }
-                                      )}
-                                      className="glass-input py-1 px-2 text-xs font-mono"
-                                    />
-                                  </div>
+                                  {protocol === 'j1939' ? (
+                                    <>
+                                      <div className="flex flex-col gap-1">
+                                        <label className="text-[10px] text-[var(--text-muted)] font-bold">PGN (Hex/Dec)</label>
+                                        <input
+                                          type="text"
+                                          placeholder="e.g. 0xF004 or 61444"
+                                          value={newMsgPgn}
+                                          onChange={(e) => setNewMsgPgn(e.target.value)}
+                                          className="glass-input py-1 px-2 text-xs font-mono"
+                                        />
+                                      </div>
+                                      <div className="flex flex-col gap-1">
+                                        <label className="text-[10px] text-[var(--text-muted)] font-bold">Priority (0-7)</label>
+                                        <select
+                                          value={newMsgPriority}
+                                          onChange={(e) => setNewMsgPriority(parseInt(e.target.value, 10))}
+                                          className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-2 py-1 text-xs focus:outline-none"
+                                        >
+                                          {[0, 1, 2, 3, 4, 5, 6, 7].map(p => (
+                                            <option key={p} value={p} className="bg-[var(--bg-color)]">{p}</option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                      <div className="flex flex-col gap-1">
+                                        <label className="text-[10px] text-[var(--text-muted)] font-bold">Source Address (SA)</label>
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          max={253}
+                                          value={newMsgSourceAddress}
+                                          onChange={(e) => setNewMsgSourceAddress(parseInt(e.target.value, 10) || 0)}
+                                          className="glass-input py-1 px-2 text-xs font-mono"
+                                        />
+                                      </div>
+                                      <div className="flex flex-col gap-1">
+                                        <label className="text-[10px] text-[var(--text-muted)] font-bold">Dest Address (DA)</label>
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          max={255}
+                                          disabled={!isP2P}
+                                          value={isP2P ? newMsgDestinationAddress : 255}
+                                          onChange={(e) => setNewMsgDestinationAddress(parseInt(e.target.value, 10) || 0)}
+                                          className="glass-input py-1 px-2 text-xs font-mono disabled:opacity-50"
+                                        />
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <div className="flex flex-col gap-1 col-span-2">
+                                      <label className="text-[10px] text-[var(--text-muted)] font-bold">Message ID (Hex or Dec)</label>
+                                      <input
+                                        type="text"
+                                        placeholder="e.g. 0x1F0 or 496"
+                                        value={newMsgId}
+                                        onChange={(e) => setNewMsgId(e.target.value)}
+                                        className="glass-input py-1 px-2 text-xs font-mono"
+                                      />
+                                    </div>
+                                  )}
                                   <div className="flex flex-col gap-1">
                                     <label className="text-[10px] text-[var(--text-muted)] font-bold">DLC (Bytes)</label>
                                     <select
-                                      value={currentMsg.dlc}
-                                      onChange={(e) => handleUpdateMessageHeader(currentMsg.id, currentMsg.id, currentMsg.name, parseInt(e.target.value, 10), currentMsg.sender)}
-                                      className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-2 py-1 text-xs focus:outline-none"
+                                      value={newMsgDlc}
+                                      onChange={(e) => setNewMsgDlc(parseInt(e.target.value, 10))}
+                                      className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500/40"
                                     >
                                       {[0, 1, 2, 3, 4, 5, 6, 7, 8].map(d => (
                                         <option key={d} value={d} className="bg-[var(--bg-color)]">{d}</option>
@@ -1241,9 +1168,9 @@ export const DbcManager: React.FC = () => {
                                   <div className="flex flex-col gap-1">
                                     <label className="text-[10px] text-[var(--text-muted)] font-bold">Sender Node</label>
                                     <select
-                                      value={currentMsg.sender}
-                                      onChange={(e) => handleUpdateMessageHeader(currentMsg.id, currentMsg.id, currentMsg.name, currentMsg.dlc, e.target.value)}
-                                      className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-2 py-1 text-xs focus:outline-none"
+                                      value={newMsgSender}
+                                      onChange={(e) => setNewMsgSender(e.target.value)}
+                                      className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500/40"
                                     >
                                       <option value="Vector__XXX" className="bg-[var(--bg-color)]">Vector__XXX (None)</option>
                                       {draftDb.nodes.map(n => (
@@ -1252,6 +1179,274 @@ export const DbcManager: React.FC = () => {
                                     </select>
                                   </div>
                                 </div>
+                                <button
+                                  onClick={handleAddMessage}
+                                  className="w-full py-1.5 bg-sky-500 hover:bg-sky-600 text-white rounded text-xs font-semibold flex items-center justify-center gap-1.5"
+                                >
+                                  <Plus className="w-3.5 h-3.5" /> Add Message Frame
+                                </button>
+                              </div>
+
+                              {/* Messages List Table */}
+                              <div className="flex-1 overflow-y-auto border border-[var(--border-sub)] rounded-lg bg-[var(--bg-card)]/40">
+                                <table className="w-full text-left text-xs border-collapse">
+                                  <thead>
+                                    <tr className="bg-[var(--bg-card-sub)] border-b border-[var(--border-sub)] text-[var(--text-muted)] font-semibold">
+                                      <th className="p-2.5 font-bold">ID (Hex)</th>
+                                      <th className="p-2.5 font-bold">Name</th>
+                                      <th className="p-2.5 font-bold">DLC</th>
+                                      <th className="p-2.5 font-bold">Sender</th>
+                                      <th className="p-2.5 font-bold">Signals</th>
+                                      <th className="p-2.5 font-bold text-right">Actions</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {Object.values(draftDb.messages).map(msg => (
+                                      <tr
+                                        key={msg.id}
+                                        className="border-b border-[var(--border-sub)] hover:bg-[var(--bg-input)]/50 transition-colors"
+                                      >
+                                        <td className="p-2.5 font-mono text-[var(--text-muted)]">0x{msg.id.toString(16).toUpperCase()}</td>
+                                        <td className="p-2.5 font-bold text-[var(--text-color)]">{msg.name}</td>
+                                        <td className="p-2.5">{msg.dlc} B</td>
+                                        <td className="p-2.5 font-semibold">{msg.sender}</td>
+                                        <td className="p-2.5">
+                                          <span className="bg-sky-500/10 text-sky-600 dark:text-sky-400 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                                            {msg.signals.length} sigs
+                                          </span>
+                                        </td>
+                                        <td className="p-2.5 text-right flex justify-end gap-1.5">
+                                          <button
+                                            onClick={() => setEditingMsgId(msg.id)}
+                                            className="px-2 py-1 rounded border border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400 hover:bg-sky-500/20 text-[10px] font-bold"
+                                          >
+                                            Edit Signals
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              const updatedMessages = { ...draftDb.messages };
+                                              delete updatedMessages[msg.id];
+                                              setDraftDb({ ...draftDb, messages: updatedMessages });
+                                            }}
+                                            className="p-1 rounded text-red-500 hover:bg-red-500/10 transition-colors"
+                                            title="Delete Message"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                    {Object.keys(draftDb.messages).length === 0 && (
+                                      <tr>
+                                        <td colSpan={6} className="p-8 text-center text-[var(--text-muted)] italic">
+                                          No messages defined. Add one above to start defining signals.
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Message Detail Editor (Form + Signals Table) */
+                            (() => {
+                              const currentMsg = draftDb.messages[editingMsgId];
+                              if (!currentMsg) {
+                                setEditingMsgId(null);
+                                return null;
+                              }
+                              return (
+                                <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+                                  {/* Header with back button */}
+                                  <div className="flex items-center justify-between border-b border-[var(--border-sub)] pb-2 flex-shrink-0">
+                                    <button
+                                      onClick={() => setEditingMsgId(null)}
+                                      className="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-1"
+                                    >
+                                      &larr; Back to Message List
+                                    </button>
+                                    <h4 className="text-xs font-bold text-[var(--text-color)]">
+                                      Editing: {currentMsg.name} (0x{currentMsg.id.toString(16).toUpperCase()})
+                                    </h4>
+                                  </div>
+
+                                  {/* Edit Message Form header */}
+                                  <div className="bg-[var(--bg-card)] border border-[var(--border-sub)] rounded-lg p-3 grid grid-cols-2 md:grid-cols-4 gap-3 flex-shrink-0">
+                                    <div className="flex flex-col gap-1 col-span-2">
+                                      <label className="text-[10px] text-[var(--text-muted)] font-bold">Message Name</label>
+                                      <input
+                                        type="text"
+                                        value={getLocalValue(`${currentMsg.id}-name`, currentMsg.name)}
+                                        onChange={(e) => handleLocalChange(`${currentMsg.id}-name`, e.target.value)}
+                                        onBlur={() => handleLocalBlur(
+                                          `${currentMsg.id}-name`,
+                                          (v) => v.trim().replace(/\s+/g, '_'),
+                                          (v) => {
+                                            if (v) handleUpdateMessageHeader(currentMsg.id, currentMsg.id, v, currentMsg.dlc, currentMsg.sender);
+                                          }
+                                        )}
+                                        className="glass-input py-1 px-2 text-xs w-full"
+                                      />
+                                    </div>
+                                    {protocol === 'j1939' ? (
+                                      (() => {
+                                        const jDetails = parseJ1939Id(currentMsg.id);
+                                        return (
+                                          <>
+                                            {/* J1939 PGN */}
+                                            <div className="flex flex-col gap-1">
+                                              <label className="text-[10px] text-[var(--text-muted)] font-bold">PGN (Hex/Dec)</label>
+                                              <input
+                                                type="text"
+                                                value={getLocalValue(`${currentMsg.id}-pgn`, `0x${jDetails.pgn.toString(16).toUpperCase()}`)}
+                                                onChange={(e) => handleLocalChange(`${currentMsg.id}-pgn`, e.target.value)}
+                                                onBlur={() => handleLocalBlur(
+                                                  `${currentMsg.id}-pgn`,
+                                                  (v) => {
+                                                    let val = parseInt(v.trim(), 10);
+                                                    if (v.trim().toLowerCase().startsWith('0x')) {
+                                                      val = parseInt(v.trim(), 16);
+                                                    }
+                                                    return isNaN(val) ? jDetails.pgn : val;
+                                                  },
+                                                  (newPgn) => {
+                                                    const newId = buildJ1939Id(jDetails.priority, newPgn, jDetails.sa, jDetails.da ?? 255);
+                                                    if (newId !== currentMsg.id) {
+                                                      handleUpdateMessageHeader(currentMsg.id, newId, currentMsg.name, currentMsg.dlc, currentMsg.sender);
+                                                    }
+                                                  }
+                                                )}
+                                                className="glass-input py-1 px-2 text-xs font-mono"
+                                              />
+                                            </div>
+                                            
+                                            {/* J1939 Priority */}
+                                            <div className="flex flex-col gap-1">
+                                              <label className="text-[10px] text-[var(--text-muted)] font-bold">Priority (0-7)</label>
+                                              <select
+                                                value={jDetails.priority}
+                                                onChange={(e) => {
+                                                  const p = parseInt(e.target.value, 10);
+                                                  const newId = buildJ1939Id(p, jDetails.pgn, jDetails.sa, jDetails.da ?? 255);
+                                                  handleUpdateMessageHeader(currentMsg.id, newId, currentMsg.name, currentMsg.dlc, currentMsg.sender);
+                                                }}
+                                                className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-2 py-1 text-xs focus:outline-none"
+                                              >
+                                                {[0, 1, 2, 3, 4, 5, 6, 7].map(p => (
+                                                  <option key={p} value={p} className="bg-[var(--bg-color)]">{p}</option>
+                                                ))}
+                                              </select>
+                                            </div>
+
+                                            {/* J1939 Source Address */}
+                                            <div className="flex flex-col gap-1">
+                                              <label className="text-[10px] text-[var(--text-muted)] font-bold">Source Address (SA)</label>
+                                              <input
+                                                type="text"
+                                                value={getLocalValue(`${currentMsg.id}-sa`, jDetails.sa)}
+                                                onChange={(e) => handleLocalChange(`${currentMsg.id}-sa`, e.target.value)}
+                                                onBlur={() => handleLocalBlur(
+                                                  `${currentMsg.id}-sa`,
+                                                  (v) => {
+                                                    let val = parseInt(v.trim(), 10);
+                                                    if (v.trim().toLowerCase().startsWith('0x')) {
+                                                      val = parseInt(v.trim(), 16);
+                                                    }
+                                                    return isNaN(val) ? jDetails.sa : Math.max(0, Math.min(253, val));
+                                                  },
+                                                  (newSa) => {
+                                                    const newId = buildJ1939Id(jDetails.priority, jDetails.pgn, newSa, jDetails.da ?? 255);
+                                                    if (newId !== currentMsg.id) {
+                                                      handleUpdateMessageHeader(currentMsg.id, newId, currentMsg.name, currentMsg.dlc, currentMsg.sender);
+                                                    }
+                                                  }
+                                                )}
+                                                className="glass-input py-1 px-2 text-xs font-mono"
+                                              />
+                                            </div>
+
+                                            {/* J1939 Destination Address */}
+                                            <div className="flex flex-col gap-1">
+                                              <label className="text-[10px] text-[var(--text-muted)] font-bold">Dest Address (DA)</label>
+                                              <input
+                                                type="text"
+                                                disabled={!jDetails.isP2P}
+                                                value={getLocalValue(`${currentMsg.id}-da`, jDetails.da ?? 255)}
+                                                onChange={(e) => handleLocalChange(`${currentMsg.id}-da`, e.target.value)}
+                                                onBlur={() => handleLocalBlur(
+                                                  `${currentMsg.id}-da`,
+                                                  (v) => {
+                                                    let val = parseInt(v.trim(), 10);
+                                                    if (v.trim().toLowerCase().startsWith('0x')) {
+                                                      val = parseInt(v.trim(), 16);
+                                                    }
+                                                    return isNaN(val) ? (jDetails.da ?? 255) : Math.max(0, Math.min(255, val));
+                                                  },
+                                                  (newDa) => {
+                                                    const newId = buildJ1939Id(jDetails.priority, jDetails.pgn, jDetails.sa, newDa);
+                                                    if (newId !== currentMsg.id) {
+                                                      handleUpdateMessageHeader(currentMsg.id, newId, currentMsg.name, currentMsg.dlc, currentMsg.sender);
+                                                    }
+                                                  }
+                                                )}
+                                                className="glass-input py-1 px-2 text-xs font-mono disabled:opacity-50"
+                                              />
+                                            </div>
+                                          </>
+                                        );
+                                      })()
+                                    ) : (
+                                      <div className="flex flex-col gap-1 col-span-2">
+                                        <label className="text-[10px] text-[var(--text-muted)] font-bold">Message ID (Hex or Dec)</label>
+                                        <input
+                                          type="text"
+                                          value={getLocalValue(`${currentMsg.id}-id`, `0x${currentMsg.id.toString(16).toUpperCase()}`)}
+                                          onChange={(e) => handleLocalChange(`${currentMsg.id}-id`, e.target.value)}
+                                          onBlur={() => handleLocalBlur(
+                                            `${currentMsg.id}-id`,
+                                            (v) => {
+                                              let val = parseInt(v.trim(), 10);
+                                              if (v.trim().toLowerCase().startsWith('0x')) {
+                                                val = parseInt(v.trim(), 16);
+                                              }
+                                              return isNaN(val) ? currentMsg.id : val;
+                                            },
+                                            (val) => {
+                                              if (val !== currentMsg.id) {
+                                                handleUpdateMessageHeader(currentMsg.id, val, currentMsg.name, currentMsg.dlc, currentMsg.sender);
+                                              }
+                                            }
+                                          )}
+                                          className="glass-input py-1 px-2 text-xs font-mono"
+                                        />
+                                      </div>
+                                    )}
+                                    <div className="flex flex-col gap-1">
+                                      <label className="text-[10px] text-[var(--text-muted)] font-bold">DLC (Bytes)</label>
+                                      <select
+                                        value={currentMsg.dlc}
+                                        onChange={(e) => handleUpdateMessageHeader(currentMsg.id, currentMsg.id, currentMsg.name, parseInt(e.target.value, 10), currentMsg.sender)}
+                                        className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-2 py-1 text-xs focus:outline-none"
+                                      >
+                                        {[0, 1, 2, 3, 4, 5, 6, 7, 8].map(d => (
+                                          <option key={d} value={d} className="bg-[var(--bg-color)]">{d}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                      <label className="text-[10px] text-[var(--text-muted)] font-bold">Sender Node</label>
+                                      <select
+                                        value={currentMsg.sender}
+                                        onChange={(e) => handleUpdateMessageHeader(currentMsg.id, currentMsg.id, currentMsg.name, currentMsg.dlc, e.target.value)}
+                                        className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-2 py-1 text-xs focus:outline-none"
+                                      >
+                                        <option value="Vector__XXX" className="bg-[var(--bg-color)]">Vector__XXX (None)</option>
+                                        {draftDb.nodes.map(n => (
+                                          <option key={n} value={n} className="bg-[var(--bg-color)]">{n}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  </div>
 
                                 {/* Signals Header / Action */}
                                 <div className="flex justify-between items-center flex-shrink-0">
@@ -1482,7 +1677,8 @@ export const DbcManager: React.FC = () => {
                           })()
                         )}
                       </div>
-                    )}
+                    );
+                  })()}
 
                     {/* Graphical Editor Save/Cancel buttons */}
                     <div className="flex gap-2.5 border-t border-[var(--border-color)] pt-3.5 flex-shrink-0">

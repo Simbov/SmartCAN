@@ -407,21 +407,21 @@ const App: React.FC = () => {
 
               {/* Main dashboard columns */}
               {(hasTop || hasBottom || isEditingLayout) ? (
-                <section className={`flex flex-col gap-4 p-1 min-h-0 ${!isEditingLayout && sortedKeys.length === 1 ? 'h-full overflow-hidden' : 'overflow-y-auto'}`}>
+                <section className={`flex flex-col gap-4 p-1 min-h-0 ${!isEditingLayout ? 'h-full overflow-hidden' : 'overflow-y-auto'}`}>
                   {/* Top zone */}
                   {(hasTop || isEditingLayout) && (
                     <div
                       onDragOver={(e) => handleZoneDragOver(e, 'main-top')}
                       onDragLeave={handleZoneDragLeave}
                       onDrop={(e) => handleZoneDrop(e, 'main-top')}
-                      className={!isEditingLayout && sortedKeys.length === 1
+                      className={!isEditingLayout && mainTopKeys.length === 1
                         ? "h-full w-full flex flex-col border-transparent"
                         : `grid grid-cols-12 gap-4 p-2 rounded-xl transition-all duration-200 border-2 ${
                             isEditingLayout
                               ? dragOverZone === 'main-top'
                                 ? 'border-cyber-accent border-solid bg-cyber-accent/10 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
                                 : 'border-dashed border-[var(--border-color)] bg-black/5'
-                              : 'border-transparent'
+                              : 'border-transparent h-full'
                           }`
                       }
                       style={{
@@ -435,15 +435,22 @@ const App: React.FC = () => {
                         const span = isSingleInZone ? 12 : (panelWidths[key] || 6);
                         const height = panelHeights[key];
                         
-                        const itemStyle = isSingleOverall
-                          ? (isEditingLayout
-                              ? { gridColumn: 'span 12 / span 12', height: '100%', width: '100%' }
-                              : { width: '100%', height: '100%', flex: 1 })
-                          : {
-                              gridColumn: `span ${span} / span ${span}`,
-                              height: height ? `${height}px` : 'auto',
-                              minHeight: '120px'
-                            };
+                        const itemStyle = !isEditingLayout
+                          ? {
+                              gridColumn: isSingleInZone ? 'span 12 / span 12' : `span ${span} / span ${span}`,
+                              height: '100%',
+                              width: '100%',
+                              flex: 1
+                            }
+                          : isSingleOverall
+                            ? (isEditingLayout
+                                ? { gridColumn: 'span 12 / span 12', height: '100%', width: '100%' }
+                                : { width: '100%', height: '100%', flex: 1 })
+                            : {
+                                gridColumn: `span ${span} / span ${span}`,
+                                height: height ? `${height}px` : 'auto',
+                                minHeight: '120px'
+                              };
 
                         return (
                           <div
@@ -476,7 +483,7 @@ const App: React.FC = () => {
                           ? dragOverZone === 'main-bottom'
                             ? 'border-cyber-accent border-solid bg-cyber-accent/10 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
                             : 'border-dashed border-[var(--border-color)] bg-black/5'
-                          : 'border-transparent'
+                          : 'border-transparent h-full'
                       }`}
                       style={{
                         flex: '1',
@@ -487,15 +494,25 @@ const App: React.FC = () => {
                         const isSingleInZone = mainBottomKeys.length === 1;
                         const span = isSingleInZone ? 12 : (panelWidths[key] || 6);
                         const height = panelHeights[key];
+                        
+                        const itemStyle = !isEditingLayout
+                          ? {
+                              gridColumn: isSingleInZone ? 'span 12 / span 12' : `span ${span} / span ${span}`,
+                              height: '100%',
+                              width: '100%',
+                              flex: 1
+                            }
+                          : {
+                              gridColumn: `span ${span} / span ${span}`,
+                              height: height ? `${height}px` : 'auto',
+                              minHeight: '120px'
+                            };
+
                         return (
                           <div
                             key={key}
                             className="overflow-hidden"
-                            style={{
-                              gridColumn: `span ${span} / span ${span}`,
-                              height: height ? `${height}px` : 'auto',
-                              minHeight: '120px'
-                            }}
+                            style={itemStyle}
                           >
                             <PanelContainer panelKey={key}>
                               {PANEL_COMPONENTS[key]}
