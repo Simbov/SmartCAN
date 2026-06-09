@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **J1939 Message Manager Streamlining**: Integrated PGN, Priority, Source Address, and Destination Address inputs directly into the graphical message manager and add/edit message header components.
+- **Live CAN Monitor Mode Memory**: Saved and persisted the selected view mode (`scroll` vs `fixed`) to the global Zustand store and `localStorage`.
+
+### Fixed
+- **Live CAN Bus Height**: Updated locked dashboard layout styling to ensure the Live CAN bus traffic grid occupies full vertical height.
+- **Modal Dialog Z-Index Bug**: Portalized custom/unrecognized message modal dialogs directly to the document body to prevent UI locking and incorrect z-index stack orders on Windows.
+
 ## [0.0.6] - 2026-06-08
 
 ### Added
