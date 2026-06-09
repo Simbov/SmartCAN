@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-06-09
+
 ### Added
 - **J1939 Message Manager Streamlining**: Integrated PGN, Priority, Source Address, and Destination Address inputs directly into the graphical message manager and add/edit message header components.
 - **Live CAN Monitor Mode Memory**: Saved and persisted the selected view mode (`scroll` vs `fixed`) to the global Zustand store and `localStorage`.
