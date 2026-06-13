@@ -1119,14 +1119,39 @@ export const DbcManager: React.FC = () => {
                                       </div>
                                       <div className="flex flex-col gap-1">
                                         <label className="text-[10px] text-[var(--text-muted)] font-bold">Source Address (SA)</label>
-                                        <input
-                                          type="number"
-                                          min={0}
-                                          max={253}
-                                          value={newMsgSourceAddress}
-                                          onChange={(e) => setNewMsgSourceAddress(parseInt(e.target.value, 10) || 0)}
-                                          className="glass-input py-1 px-2 text-xs font-mono"
-                                        />
+                                        <div className="flex gap-1.5 items-center">
+                                          <input
+                                            type="number"
+                                            min={0}
+                                            max={253}
+                                            value={newMsgSourceAddress}
+                                            onChange={(e) => setNewMsgSourceAddress(parseInt(e.target.value, 10) || 0)}
+                                            className="glass-input py-1 px-2 text-xs font-mono w-16"
+                                          />
+                                          {(() => {
+                                            const activeProj = projects.find(p => p.id === activeProjectId);
+                                            const devicesList = activeProj ? activeProj.devices : [];
+                                            if (devicesList.length === 0) return null;
+                                            return (
+                                              <select
+                                                onChange={(e) => {
+                                                  if (e.target.value) {
+                                                    setNewMsgSourceAddress(parseInt(e.target.value, 10));
+                                                  }
+                                                }}
+                                                value=""
+                                                className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-1.5 py-1 text-xs max-w-[120px] focus:outline-none"
+                                              >
+                                                <option value="" disabled>Select SA...</option>
+                                                {devicesList.map(dev => (
+                                                  <option key={dev.id} value={dev.nodeId}>
+                                                    {dev.name} ({dev.nodeId})
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            );
+                                          })()}
+                                        </div>
                                       </div>
                                       <div className="flex flex-col gap-1">
                                         <label className="text-[10px] text-[var(--text-muted)] font-bold">Dest Address (DA)</label>

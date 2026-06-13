@@ -32,6 +32,7 @@ export interface CanDevice {
   nodeId: number;
   enabled: boolean;
   isSimulated: boolean;
+  mimicDbcNode?: string; // DBC Node Name to mimic
   customMessages: Array<{
     id: number;
     name: string;
@@ -139,6 +140,11 @@ interface CanStore {
   canopenNodes: Record<number, CanopenNode>;
   tpReassembler: J1939TpReassembler;
 
+  // Multi-window and tracking
+  timestampOffset: number | null;
+  lastPhysicalTimestamp: number | null;
+  trackedBits: Array<{ msgId: number; byteIdx: number; bitIdx: number }>;
+
   // Actions
   setProtocol: (proto: 'canopen' | 'j1939') => void;
   setBaudRate: (baud: number) => void;
@@ -205,6 +211,12 @@ interface CanStore {
   sendSdoRequest: (targetNodeId: number, index: number, subIndex: number, data: Uint8Array, cs: number) => void;
   sendJ1939AddressClaim: (nodeAddress: number, name: bigint) => void;
   sendJ1939Request: (pgn: number, destination: number) => void;
+
+  // New actions
+  setActiveDbcName: (name: string) => void;
+  setPanelVisibility: (panelName: string, visible: boolean) => void;
+  toggleTrackBit: (msgId: number, byteIdx: number, bitIdx: number) => void;
+  syncFromStorage: (parsed: any) => void;
 }
 
 const defaultDbcJ1939 = parseDbc(DEFAULT_J1939_DBC);
@@ -220,6 +232,7 @@ function reconstructDevices(devices: any[]): CanDevice[] {
     nodeId: typeof d.nodeId === 'number' ? d.nodeId : 1,
     enabled: d.enabled !== false,
     isSimulated: d.isSimulated !== false,
+    mimicDbcNode: d.mimicDbcNode,
     customMessages: Array.isArray(d.customMessages)
       ? d.customMessages.map((msg: any) => {
           const dlc = Number(msg.dlc) || 8;
@@ -381,7 +394,10 @@ const getInitialState = () => {
       1: createCanopenNode(1),
       2: createCanopenNode(2)
     } as Record<number, CanopenNode>,
-    tpReassembler: new J1939TpReassembler()
+    tpReassembler: new J1939TpReassembler(),
+    timestampOffset: null as number | null,
+    lastPhysicalTimestamp: null as number | null,
+    trackedBits: [] as Array<{ msgId: number; byteIdx: number; bitIdx: number }>
   };
 
   if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
@@ -445,6 +461,9 @@ const getInitialState = () => {
             logs: [],
             fixedLogs: {},
             totalFramesReceived: 0,
+            timestampOffset: null,
+            lastPhysicalTimestamp: null,
+            trackedBits: parsed.trackedBits || [],
             plotPoints: [],
             canopenNodes: activeProj.protocol === 'canopen' ? (() => {
               const nodes: Record<number, CanopenNode> = {};
@@ -1265,10 +1284,22 @@ export const useStore = create<CanStore>((set, get) => {
         return;
       }
 
+      // Apply Kvaser physical timestamp offset correction
+      let timestamp = frame.timestamp;
+      if (state.kvaserStatus === 'physical' && frame.direction === 'RX') {
+        let offset = state.timestampOffset;
+        if (offset === null) {
+          offset = state.simTime - frame.timestamp;
+          set({ timestampOffset: offset });
+        }
+        timestamp = frame.timestamp + offset;
+        set({ lastPhysicalTimestamp: frame.timestamp });
+      }
+
       // Delta timing computation
-      const lastT = lastTimestampsById[frame.id] ?? frame.timestamp;
-      const delta = frame.timestamp - lastT;
-      lastTimestampsById[frame.id] = frame.timestamp;
+      const lastT = lastTimestampsById[frame.id] ?? timestamp;
+      const delta = timestamp - lastT;
+      lastTimestampsById[frame.id] = timestamp;
 
       // Extract message name and decode signals using DBC if available
       let decodedSignals: Record<string, number> | null = null;
@@ -1325,15 +1356,27 @@ export const useStore = create<CanStore>((set, get) => {
         }
       }
 
+      // Tracked bits decoding
+      const matchingTracked = state.trackedBits.filter(tb => tb.msgId === frame.id);
+      if (matchingTracked.length > 0) {
+        if (!decodedSignals) decodedSignals = {};
+        matchingTracked.forEach(tb => {
+          const byteVal = frame.data[tb.byteIdx] ?? 0;
+          const bitVal = (byteVal >> tb.bitIdx) & 1;
+          const name = `0x${frame.id.toString(16).toUpperCase()}_B${tb.byteIdx}_b${tb.bitIdx}`;
+          decodedSignals![name] = bitVal;
+        });
+      }
+
       // Handle transport protocol reassembly in reassembler (J1939 only)
       if (state.protocol === 'j1939') {
-        const assembled = state.tpReassembler.processFrame(frame.id, frame.data, frame.timestamp);
+        const assembled = state.tpReassembler.processFrame(frame.id, frame.data, timestamp);
         if (assembled) {
           const longId = buildJ1939Id(7, assembled.pgn, assembled.sa, 255);
           
           setTimeout(() => {
             state.addLog({
-              timestamp: frame.timestamp,
+              timestamp: timestamp,
               direction: 'RX',
               id: longId,
               dlc: assembled.payload.length,
@@ -1362,7 +1405,7 @@ export const useStore = create<CanStore>((set, get) => {
 
         if (addedAny) {
           set(state => {
-            const nextPlot = [...state.plotPoints, { timestamp: frame.timestamp, values: plotValues }];
+            const nextPlot = [...state.plotPoints, { timestamp, values: plotValues }];
             // Limit plotter history to 100 entries for safety/performance
             if (nextPlot.length > 100) nextPlot.shift();
             return { plotPoints: nextPlot };
@@ -1414,6 +1457,7 @@ export const useStore = create<CanStore>((set, get) => {
       // Append CAN log
       const newLog: CanLog = {
         ...frame,
+        timestamp,
         name: msgName,
         delta,
         decodedSignals,
@@ -1443,7 +1487,15 @@ export const useStore = create<CanStore>((set, get) => {
 
     clearLogs: () => {
       Object.keys(lastTimestampsById).forEach(key => delete lastTimestampsById[Number(key)]);
-      set({ logs: [], fixedLogs: {}, plotPoints: [], totalFramesReceived: 0 });
+      set({
+        logs: [],
+        fixedLogs: {},
+        plotPoints: [],
+        totalFramesReceived: 0,
+        simTime: 0,
+        timestampOffset: null,
+        lastPhysicalTimestamp: null
+      });
     },
     
     setPausedLogs: (pausedLogs) => set({ pausedLogs }),
@@ -1578,12 +1630,17 @@ export const useStore = create<CanStore>((set, get) => {
     },
 
     togglePlotSignal: (sigName) => set(state => {
-      const nextSignals = state.plotSignals.includes(sigName)
-        ? state.plotSignals.filter(s => s !== sigName)
-        : [...state.plotSignals, sigName];
+      const isAdding = !state.plotSignals.includes(sigName);
+      const nextSignals = isAdding
+        ? [...state.plotSignals, sigName]
+        : state.plotSignals.filter(s => s !== sigName);
       return {
         plotSignals: nextSignals,
-        plotPoints: [] // Reset plotter display to redraw correctly
+        plotPoints: [], // Reset plotter display to redraw correctly
+        visiblePanels: {
+          ...state.visiblePanels,
+          livePlotter: isAdding ? true : state.visiblePanels.livePlotter
+        }
       };
     }),
 
@@ -1592,14 +1649,15 @@ export const useStore = create<CanStore>((set, get) => {
     // Transmit Frame Action
     transmitFrame: (id, data) => {
       const state = get();
-      // Add log locally as a TX frame
-      state.addLog({
-        timestamp: state.simTime,
-        direction: 'TX',
-        id,
-        dlc: data.length,
-        data
-      });
+      
+      let txTimestamp = state.simTime;
+      if (state.kvaserStatus === 'physical') {
+        if (state.lastPhysicalTimestamp !== null && state.timestampOffset !== null) {
+          txTimestamp = state.lastPhysicalTimestamp + state.timestampOffset;
+        } else {
+          txTimestamp = Date.now();
+        }
+      }
 
       // Write to Kvaser native bus if in Tauri
       if (isTauriEnv()) {
@@ -1607,6 +1665,28 @@ export const useStore = create<CanStore>((set, get) => {
           invoke('send_kvaser', { id, data: Array.from(data) }).catch(err => {
             console.error('Failed to send Kvaser frame:', err);
           });
+        });
+      }
+
+      // Broadcast the TX frame so all windows (including this one) log it
+      if (isTauriEnv()) {
+        import('@tauri-apps/api/event').then(({ emit }) => {
+          emit('simulated-frame', {
+            timestamp: txTimestamp,
+            direction: 'TX',
+            id,
+            dlc: data.length,
+            data: Array.from(data)
+          });
+        });
+      } else {
+        // Direct state feed for browser fallback
+        state.addLog({
+          timestamp: txTimestamp,
+          direction: 'TX',
+          id,
+          dlc: data.length,
+          data
         });
       }
 
@@ -1726,119 +1806,166 @@ export const useStore = create<CanStore>((set, get) => {
         currentState.devices.forEach(device => {
           if (!device.enabled || !device.isSimulated) return;
 
-          if (currentState.protocol === 'j1939') {
-            // J1939 Simulated ECU Traffic
-            if (device.name.includes('Engine') && Math.floor(nextTime / 50) % 2 === 0) {
-              // Engine Speed (EEC1, PGN 61444): cycle every 100ms
-              const rpm = 2000 + 800 * Math.sin(t * 0.5) + Math.random() * 50;
-              const torque = 45 + 10 * Math.cos(t * 0.7);
-              const accel = 60 + 5 * Math.sin(t * 0.2);
+          if (device.mimicDbcNode) {
+            // Mimic DBC Node Mode
+            // Find all messages sent by this node in any active DBC
+            Object.values(currentState.dbcs).forEach(db => {
+              Object.values(db.messages).forEach(msg => {
+                if (msg.sender === device.mimicDbcNode) {
+                  // Determine transmission interval
+                  let interval: number;
+                  const lowerName = msg.name.toLowerCase();
+                  if (lowerName.includes('eec1') || lowerName.includes('speed') || lowerName.includes('rapid')) {
+                    interval = 100;
+                  } else if (lowerName.includes('temp') || lowerName.includes('slow') || lowerName.includes('oil')) {
+                    interval = 500;
+                  } else if (lowerName.includes('tc1') || lowerName.includes('gear')) {
+                    interval = 200;
+                  } else {
+                    interval = ((msg.id % 5) + 1) * 100; // 100ms - 500ms
+                  }
 
-              const signals = {
-                EngineSpeed: rpm,
-                EngineTorque: torque,
-                AcceleratorPosition: accel
-              };
+                  const ticks = Math.floor(nextTime / 50);
+                  const msgTicks = Math.floor(interval / 50);
+                  if (msgTicks > 0 && ticks % msgTicks === 0) {
+                    // Generate dynamic values for signals
+                    const signalValues: Record<string, number> = {};
+                    msg.signals.forEach(sig => {
+                      const min = sig.min !== undefined ? sig.min : 0;
+                      const max = sig.max !== undefined && sig.max > min ? sig.max : 255;
+                      const amplitude = (max - min) / 2;
+                      const mid = min + amplitude;
+                      const freqSeed = sig.name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+                      const speed = 0.1 + (freqSeed % 5) * 0.05;
+                      let val = mid + amplitude * Math.sin(t * speed);
+                      if (val < min) val = min;
+                      if (val > max) val = max;
+                      signalValues[sig.name] = val;
+                    });
 
-              const encoded = encodeFromActiveDbcs(2364539904, signals);
-              if (encoded) {
-                const txId = buildJ1939Id(3, 0xF004, device.nodeId, 255);
-                currentState.addLog({
-                  timestamp: nextTime,
-                  direction: 'RX',
-                  id: txId,
-                  dlc: encoded.length,
-                  data: encoded
-                });
-              }
-            }
+                    const encoded = encodeFrame(msg.id, signalValues, db);
+                    if (encoded) {
+                      let txId = msg.id;
+                      if (currentState.protocol === 'j1939') {
+                        const parsedId = parseJ1939Id(msg.id);
+                        txId = buildJ1939Id(parsedId.priority, parsedId.pgn, device.nodeId, 255);
+                      } else if (currentState.protocol === 'canopen') {
+                        const base = msg.id & 0x780;
+                        if (base === 0x180 || base === 0x280 || base === 0x380 || base === 0x480) {
+                          txId = base + device.nodeId;
+                        }
+                      }
 
-            if (device.name.includes('Engine') && Math.floor(nextTime / 50) % 10 === 0) {
-              // Coolant Temperature (ET1, PGN 65262): cycle every 500ms
-              const coolantTemp = 82 + 2 * Math.sin(t * 0.05);
-              const oilTemp = 95 + 4 * Math.sin(t * 0.06);
-
-              const signals = {
-                EngineCoolantTemp: coolantTemp,
-                EngineOilTemp: oilTemp
-              };
-
-              const encoded = encodeFromActiveDbcs(2364543488, signals);
-              if (encoded) {
-                const txId = buildJ1939Id(6, 0xFEEE, device.nodeId, 255);
-                currentState.addLog({
-                  timestamp: nextTime,
-                  direction: 'RX',
-                  id: txId,
-                  dlc: encoded.length,
-                  data: encoded
-                });
-              }
-            }
-
-            if (device.name.includes('Transmission') && Math.floor(nextTime / 50) % 4 === 0) {
-              // Transmission Control 1 (TC1): cycle every 200ms
-              const gear = Math.floor(3 + Math.sin(t * 0.1) * 2);
-              const signals = {
-                TransmissionSelectedGear: gear,
-                TransmissionActualGear: gear
-              };
-
-              const encoded = encodeFromActiveDbcs(2364539905, signals);
-              if (encoded) {
-                const txId = buildJ1939Id(3, 0xF005, device.nodeId, 255);
-                currentState.addLog({
-                  timestamp: nextTime,
-                  direction: 'RX',
-                  id: txId,
-                  dlc: encoded.length,
-                  data: encoded
-                });
-              }
-            }
-
+                      // Broadcast
+                      if (isTauriEnv()) {
+                        import('@tauri-apps/api/event').then(({ emit }) => {
+                          emit('simulated-frame', {
+                            timestamp: nextTime,
+                            direction: 'RX',
+                            id: txId,
+                            dlc: encoded.length,
+                            data: Array.from(encoded)
+                          });
+                        });
+                      } else {
+                        currentState.addLog({
+                          timestamp: nextTime,
+                          direction: 'RX',
+                          id: txId,
+                          dlc: encoded.length,
+                          data: encoded
+                        });
+                      }
+                    }
+                  }
+                }
+              });
+            });
           } else {
-            // CANopen Simulated Node Traffic
-            const openNode = currentState.canopenNodes[device.nodeId];
-            if (openNode && device.enabled && openNode.nmtState !== 'STOPPED') {
-              
-              const ticks = Math.floor(nextTime / 50);
-              const hbTicks = Math.floor(openNode.heartbeatInterval / 50);
-              
-              if (hbTicks > 0 && ticks % hbTicks === 0) {
-                const frame = generateHeartbeatFrame(openNode);
-                currentState.addLog({
-                  timestamp: nextTime,
-                  direction: 'RX',
-                  id: frame.id,
-                  dlc: frame.data.length,
-                  data: frame.data
-                });
-              }
-
-              // Cyclical PDOs: Transmit TxPDO1 from Node 1 if Operational
-              if (openNode.nmtState === 'OPERATIONAL' && device.nodeId === 1 && ticks % 4 === 0) {
-                const digital = Math.random() > 0.95 ? 1 : 0;
-                const analog1 = 2.4 + 1.2 * Math.sin(t * 2);
-                const analog2 = 5.0 + 0.5 * Math.cos(t);
-
-                const encoded = encodeFromActiveDbcs(385, {
-                  DigitalInputs: digital,
-                  AnalogInput1: analog1,
-                  AnalogInput2: analog2
-                });
-
+            // Fallback to existing hardcoded simulation logic
+            if (currentState.protocol === 'j1939') {
+              if (device.name.includes('Engine') && Math.floor(nextTime / 50) % 2 === 0) {
+                const rpm = 2000 + 800 * Math.sin(t * 0.5) + Math.random() * 50;
+                const torque = 45 + 10 * Math.cos(t * 0.7);
+                const accel = 60 + 5 * Math.sin(t * 0.2);
+                const signals = { EngineSpeed: rpm, EngineTorque: torque, AcceleratorPosition: accel };
+                const encoded = encodeFromActiveDbcs(2364539904, signals);
                 if (encoded) {
-                  currentState.addLog({
-                    timestamp: nextTime,
-                    direction: 'RX',
-                    id: 0x180 + device.nodeId,
-                    dlc: encoded.length,
-                    data: encoded
-                  });
+                  const txId = buildJ1939Id(3, 0xF004, device.nodeId, 255);
+                  if (isTauriEnv()) {
+                    import('@tauri-apps/api/event').then(({ emit }) => {
+                      emit('simulated-frame', { timestamp: nextTime, direction: 'RX', id: txId, dlc: encoded.length, data: Array.from(encoded) });
+                    });
+                  } else {
+                    currentState.addLog({ timestamp: nextTime, direction: 'RX', id: txId, dlc: encoded.length, data: encoded });
+                  }
                 }
               }
+              if (device.name.includes('Engine') && Math.floor(nextTime / 50) % 10 === 0) {
+                const coolantTemp = 82 + 2 * Math.sin(t * 0.05);
+                const oilTemp = 95 + 4 * Math.sin(t * 0.06);
+                const signals = { EngineCoolantTemp: coolantTemp, EngineOilTemp: oilTemp };
+                const encoded = encodeFromActiveDbcs(2364543488, signals);
+                if (encoded) {
+                  const txId = buildJ1939Id(6, 0xFEEE, device.nodeId, 255);
+                  if (isTauriEnv()) {
+                    import('@tauri-apps/api/event').then(({ emit }) => {
+                      emit('simulated-frame', { timestamp: nextTime, direction: 'RX', id: txId, dlc: encoded.length, data: Array.from(encoded) });
+                    });
+                  } else {
+                    currentState.addLog({ timestamp: nextTime, direction: 'RX', id: txId, dlc: encoded.length, data: encoded });
+                  }
+                }
+              }
+              if (device.name.includes('Transmission') && Math.floor(nextTime / 50) % 4 === 0) {
+                const gear = Math.floor(3 + Math.sin(t * 0.1) * 2);
+                const signals = { TransmissionSelectedGear: gear, TransmissionActualGear: gear };
+                const encoded = encodeFromActiveDbcs(2364539905, signals);
+                if (encoded) {
+                  const txId = buildJ1939Id(3, 0xF005, device.nodeId, 255);
+                  if (isTauriEnv()) {
+                    import('@tauri-apps/api/event').then(({ emit }) => {
+                      emit('simulated-frame', { timestamp: nextTime, direction: 'RX', id: txId, dlc: encoded.length, data: Array.from(encoded) });
+                    });
+                  } else {
+                    currentState.addLog({ timestamp: nextTime, direction: 'RX', id: txId, dlc: encoded.length, data: encoded });
+                  }
+                }
+              }
+            } else {
+              // CANopen Simulated Node Traffic
+              const openNode = currentState.canopenNodes[device.nodeId];
+              if (openNode && device.enabled && openNode.nmtState !== 'STOPPED') {
+                const ticks = Math.floor(nextTime / 50);
+                const hbTicks = Math.floor(openNode.heartbeatInterval / 50);
+                
+                if (hbTicks > 0 && ticks % hbTicks === 0) {
+                  const frame = generateHeartbeatFrame(openNode);
+                  if (isTauriEnv()) {
+                    import('@tauri-apps/api/event').then(({ emit }) => {
+                      emit('simulated-frame', { timestamp: nextTime, direction: 'RX', id: frame.id, dlc: frame.data.length, data: Array.from(frame.data) });
+                    });
+                  } else {
+                    currentState.addLog({ timestamp: nextTime, direction: 'RX', id: frame.id, dlc: frame.data.length, data: frame.data });
+                  }
+                }
 
+                if (openNode.nmtState === 'OPERATIONAL' && device.nodeId === 1 && ticks % 4 === 0) {
+                  const digital = Math.random() > 0.95 ? 1 : 0;
+                  const analog1 = 2.4 + 1.2 * Math.sin(t * 2);
+                  const analog2 = 5.0 + 0.5 * Math.cos(t);
+                  const encoded = encodeFromActiveDbcs(385, { DigitalInputs: digital, AnalogInput1: analog1, AnalogInput2: analog2 });
+                  if (encoded) {
+                    if (isTauriEnv()) {
+                      import('@tauri-apps/api/event').then(({ emit }) => {
+                        emit('simulated-frame', { timestamp: nextTime, direction: 'RX', id: 0x180 + device.nodeId, dlc: encoded.length, data: Array.from(encoded) });
+                      });
+                    } else {
+                      currentState.addLog({ timestamp: nextTime, direction: 'RX', id: 0x180 + device.nodeId, dlc: encoded.length, data: encoded });
+                    }
+                  }
+                }
+              }
             }
           }
         });
@@ -1851,13 +1978,25 @@ export const useStore = create<CanStore>((set, get) => {
             const ticks = Math.floor(nextTime / 50);
             const msgTicks = Math.floor(msg.interval / 50);
             if (msgTicks > 0 && ticks % msgTicks === 0) {
-              currentState.addLog({
-                timestamp: nextTime,
-                direction: 'RX',
-                id: msg.id,
-                dlc: msg.dlc,
-                data: msg.data
-              });
+              if (isTauriEnv()) {
+                import('@tauri-apps/api/event').then(({ emit }) => {
+                  emit('simulated-frame', {
+                    timestamp: nextTime,
+                    direction: 'RX',
+                    id: msg.id,
+                    dlc: msg.dlc,
+                    data: Array.from(msg.data)
+                  });
+                });
+              } else {
+                currentState.addLog({
+                  timestamp: nextTime,
+                  direction: 'RX',
+                  id: msg.id,
+                  dlc: msg.dlc,
+                  data: msg.data
+                });
+              }
             }
           });
         });
@@ -1874,9 +2013,123 @@ export const useStore = create<CanStore>((set, get) => {
         clearInterval(state.simulationTimer);
       }
       set({ isSimulating: false, simulationTimer: null });
-    }
+    },
+
+    setActiveDbcName: (name) => set({ activeDbcName: name }),
+
+    setPanelVisibility: (panelName, visible) => set(state => ({
+      visiblePanels: {
+        ...state.visiblePanels,
+        [panelName]: visible
+      }
+    })),
+
+    toggleTrackBit: (msgId, byteIdx, bitIdx) => {
+      set(state => {
+        const exists = state.trackedBits.some(
+          tb => tb.msgId === msgId && tb.byteIdx === byteIdx && tb.bitIdx === bitIdx
+        );
+        const name = `0x${msgId.toString(16).toUpperCase()}_B${byteIdx}_b${bitIdx}`;
+        
+        let nextTracked;
+        if (exists) {
+          nextTracked = state.trackedBits.filter(
+            tb => !(tb.msgId === msgId && tb.byteIdx === byteIdx && tb.bitIdx === bitIdx)
+          );
+        } else {
+          nextTracked = [...state.trackedBits, { msgId, byteIdx, bitIdx }];
+        }
+
+        let nextPlotSignals = [...state.plotSignals];
+        if (exists) {
+          nextPlotSignals = nextPlotSignals.filter(s => s !== name);
+        } else {
+          if (!nextPlotSignals.includes(name)) {
+            nextPlotSignals.push(name);
+          }
+        }
+
+        return {
+          trackedBits: nextTracked,
+          plotSignals: nextPlotSignals,
+          visiblePanels: {
+            ...state.visiblePanels,
+            livePlotter: true
+          }
+        };
+      });
+    },
+
+    syncFromStorage: (parsed) => set(state => {
+      const activeProjId = parsed.activeProjectId || state.activeProjectId;
+      const restoredProjects = Array.isArray(parsed.projects)
+        ? parsed.projects.map((proj: any) => ({
+            ...proj,
+            devices: reconstructDevices(proj.devices)
+          }))
+        : state.projects;
+      const activeProj = restoredProjects.find((p: any) => p.id === activeProjId) || state.projects.find((p: any) => p.id === state.activeProjectId);
+
+      const parsedDbcs: Record<string, DbcDatabase> = {};
+      if (parsed.dbcRegistry) {
+        parsed.dbcRegistry.forEach((entry: any) => {
+          if (entry.enabled) {
+            try {
+              parsedDbcs[entry.name] = parseDbc(entry.content);
+            } catch (e) {
+              console.error('Failed to parse DBC in storage sync:', entry.name, e);
+            }
+          }
+        });
+      }
+
+      return {
+        ...state,
+        ...parsed,
+        projects: restoredProjects,
+        activeProjectId: activeProjId,
+        dbcs: parsedDbcs,
+        devices: activeProj ? activeProj.devices : state.devices,
+        projectSettings: activeProj ? {
+          name: activeProj.name || 'Default Project',
+          disabledMessageIds: activeProj.disabledMessageIds || {},
+          messageNameOverrides: activeProj.messageNameOverrides || {}
+        } : state.projectSettings
+      };
+    })
   };
 });
+
+// Register global listeners for Tauri events & storage events
+if (typeof window !== 'undefined') {
+  if (isTauriEnv()) {
+    import('@tauri-apps/api/event').then(({ listen }) => {
+      listen('simulated-frame', (event: { payload: any }) => {
+        const frame = event.payload as { timestamp: number; direction: 'RX' | 'TX'; id: number; dlc: number; data: number[] };
+        useStore.getState().addLog({
+          timestamp: frame.timestamp,
+          direction: frame.direction,
+          id: frame.id,
+          dlc: frame.dlc,
+          data: new Uint8Array(frame.data)
+        });
+      }).catch(err => {
+        console.error('Failed to subscribe to simulated-frame:', err);
+      });
+    });
+  }
+
+  window.addEventListener('storage', (event) => {
+    if (event.key === 'smartcan_state_v1' && event.newValue) {
+      try {
+        const parsed = JSON.parse(event.newValue);
+        useStore.getState().syncFromStorage(parsed);
+      } catch (e) {
+        console.error('Failed to parse storage event value:', e);
+      }
+    }
+  });
+}
 
 declare global {
   interface Window {
@@ -1888,6 +2141,7 @@ if (typeof window !== 'undefined') {
   window.__store = useStore;
 }
 
+let lastSavedJson = '';
 // Subscribe to store changes to persist to localStorage
 useStore.subscribe((state) => {
   if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
@@ -1921,9 +2175,13 @@ useStore.subscribe((state) => {
         panelWidths: state.panelWidths,
         panelHeights: state.panelHeights,
         panelOrder: state.panelOrder,
-        liveViewerMode: state.liveViewerMode
+        liveViewerMode: state.liveViewerMode,
+        trackedBits: state.trackedBits
       };
-      localStorage.setItem('smartcan_state_v1', JSON.stringify(persistedState));
+      const json = JSON.stringify(persistedState);
+      if (json === lastSavedJson) return;
+      lastSavedJson = json;
+      localStorage.setItem('smartcan_state_v1', json);
     } catch (e) {
       console.error('Failed to save state to localStorage:', e);
     }

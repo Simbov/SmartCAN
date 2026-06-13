@@ -23,7 +23,9 @@ export const LiveViewer: React.FC = () => {
     dbcs,
     activeDbcName,
     liveViewerMode: viewMode,
-    setLiveViewerMode: setViewMode
+    setLiveViewerMode: setViewMode,
+    trackedBits,
+    toggleTrackBit
   } = useStore();
 
   const [filterText, setFilterText] = useState('');
@@ -419,7 +421,7 @@ export const LiveViewer: React.FC = () => {
   };
 
   return (
-    <div className="glass-panel p-4 flex flex-col h-full overflow-hidden">
+    <div className="glass-panel p-4 flex flex-col h-full overflow-hidden live-viewer-container">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-2 border-b border-[var(--border-color)]">
         <div className="flex items-center gap-2 min-w-0">
           <Filter className={`w-4 h-4 shrink-0 ${protocol === 'j1939' ? 'text-cyber-j1939' : 'text-cyber-canopen'}`} />
@@ -709,8 +711,8 @@ export const LiveViewer: React.FC = () => {
           <thead className="sticky top-0 bg-[var(--bg-table-header)] text-[10px] text-[var(--text-muted)] border-b border-[var(--border-color)] uppercase tracking-wider select-none z-10">
             <tr>
               {visibleColumns.time && <th className={`py-2.5 px-3 ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('time')}>Time (ms) {renderSortIndicator('time')}</th>}
-              {visibleColumns.delta && <th className={`py-2.5 px-3 ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('delta')}>Delta (ms) {renderSortIndicator('delta')}</th>}
-              {visibleColumns.dir && <th className={`py-2.5 px-3 ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('dir')}>Dir (Rx/Tx) {renderSortIndicator('dir')}</th>}
+              {visibleColumns.delta && <th className={`py-2.5 px-3 col-hide-narrow ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('delta')}>Delta (ms) {renderSortIndicator('delta')}</th>}
+              {visibleColumns.dir && <th className={`py-2.5 px-3 col-hide-narrow ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('dir')}>Dir (Rx/Tx) {renderSortIndicator('dir')}</th>}
               {visibleColumns.id && <th className={`py-2.5 px-3 ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('id')}>CAN ID {renderSortIndicator('id')}</th>}
               {protocol === 'j1939' && visibleColumns.pgn && <th className={`py-2.5 px-3 ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('pgn')}>PGN {renderSortIndicator('pgn')}</th>}
               {protocol === 'j1939' && visibleColumns.sa && <th className={`py-2.5 px-3 ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('sa')}>Src Address (SA) {renderSortIndicator('sa')}</th>}
@@ -718,10 +720,10 @@ export const LiveViewer: React.FC = () => {
               {protocol === 'canopen' && visibleColumns.functionCode && <th className={`py-2.5 px-3 ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('functionCode')}>Func Code {renderSortIndicator('functionCode')}</th>}
               {protocol === 'canopen' && visibleColumns.nodeId && <th className={`py-2.5 px-3 ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('nodeId')}>Node ID {renderSortIndicator('nodeId')}</th>}
               {protocol === 'canopen' && visibleColumns.canopenIndex && <th className={`py-2.5 px-3 ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('canopenIndex')}>SDO Index {renderSortIndicator('canopenIndex')}</th>}
-              {visibleColumns.dlc && <th className={`py-2.5 px-3 ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('dlc')}>DLC {renderSortIndicator('dlc')}</th>}
+              {visibleColumns.dlc && <th className={`py-2.5 px-3 col-hide-narrow ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('dlc')}>DLC {renderSortIndicator('dlc')}</th>}
               {visibleColumns.payload && <th className={`py-2.5 px-3 ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('payload')}>Payload (Hex) {renderSortIndicator('payload')}</th>}
               {visibleColumns.dbcName && <th className={`py-2.5 px-3 ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('dbcName')}>DBC Message Name {renderSortIndicator('dbcName')}</th>}
-              {visibleColumns.srcDevice && <th className={`py-2.5 px-3 ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('srcDevice')}>Source Device {renderSortIndicator('srcDevice')}</th>}
+              {visibleColumns.srcDevice && <th className={`py-2.5 px-3 col-hide-narrow ${viewMode === 'fixed' ? 'cursor-pointer hover:bg-[var(--bg-input)] select-none' : ''}`} onClick={() => handleHeaderClick('srcDevice')}>Source Device {renderSortIndicator('srcDevice')}</th>}
               {visibleColumns.decodedData && <th className="py-2.5 px-3">Decoded Signals</th>}
               <th className="py-2.5 px-3 w-16 text-right"></th>
             </tr>
@@ -752,8 +754,8 @@ export const LiveViewer: React.FC = () => {
                   <React.Fragment key={rowKey}>
                     <tr onClick={() => setExpandedRowKey(isExpanded ? null : rowExpansionKey)} className={`hover:bg-[var(--bg-input)] cursor-pointer transition-colors ${log.direction === 'TX' ? 'bg-blue-500/5' : ''}`}>
                       {visibleColumns.time && <td className="py-2 px-3 text-[var(--text-muted)]">{log.timestamp}</td>}
-                      {visibleColumns.delta && <td className={`py-2 px-3 font-semibold ${log.delta > 200 ? 'text-amber-500' : 'text-[var(--text-muted)]'}`}>+{typeof log.delta === 'number' ? log.delta.toFixed(1) : log.delta}</td>}
-                      {visibleColumns.dir && <td className="py-2 px-3"><span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${log.direction === 'TX' ? 'bg-blue-500/10 text-blue-500 border border-blue-500/20' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'}`}>{log.direction}</span></td>}
+                      {visibleColumns.delta && <td className={`py-2 px-3 col-hide-narrow font-semibold ${log.delta > 200 ? 'text-amber-500' : 'text-[var(--text-muted)]'}`}>+{typeof log.delta === 'number' ? log.delta.toFixed(1) : log.delta}</td>}
+                      {visibleColumns.dir && <td className="py-2 px-3 col-hide-narrow"><span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${log.direction === 'TX' ? 'bg-blue-500/10 text-blue-500 border border-blue-500/20' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'}`}>{log.direction}</span></td>}
                       {visibleColumns.id && <td className={`py-2 px-3 font-semibold ${protocol === 'j1939' ? 'text-cyber-j1939' : 'text-cyber-canopen'}`}>{idHex}</td>}
                       {protocol === 'j1939' && (
                         <>
@@ -781,7 +783,7 @@ export const LiveViewer: React.FC = () => {
                           )}
                         </>
                       )}
-                      {visibleColumns.dlc && <td className="py-2 px-3 text-[var(--text-muted)]">{log.dlc}</td>}
+                      {visibleColumns.dlc && <td className="py-2 px-3 col-hide-narrow text-[var(--text-muted)]">{log.dlc}</td>}
                       {visibleColumns.payload && (
                         <td className="py-2 px-3 font-mono text-[var(--text-color)]">
                           <div className="flex flex-wrap gap-1">
@@ -823,7 +825,7 @@ export const LiveViewer: React.FC = () => {
                         </td>
                       )}
                       {visibleColumns.dbcName && <td className="py-2 px-3 text-[var(--text-color)] font-medium"><span className="truncate max-w-[150px] block" title={log.name || 'Unknown'}>{log.name || 'Unknown'}</span></td>}
-                      {visibleColumns.srcDevice && <td className="py-2 px-3 text-[var(--text-color)] font-medium"><span className="truncate max-w-[150px] block" title={protocol === 'j1939' && j1939Details ? getNickname(j1939Details.sa) : getNickname(log.id & 0x07F)}>{protocol === 'j1939' && j1939Details ? getNickname(j1939Details.sa) : getNickname(log.id & 0x07F)}</span></td>}
+                      {visibleColumns.srcDevice && <td className="py-2 px-3 col-hide-narrow text-[var(--text-color)] font-medium"><span className="truncate max-w-[150px] block" title={protocol === 'j1939' && j1939Details ? getNickname(j1939Details.sa) : getNickname(log.id & 0x07F)}>{protocol === 'j1939' && j1939Details ? getNickname(j1939Details.sa) : getNickname(log.id & 0x07F)}</span></td>}
                       {visibleColumns.decodedData && <td className="py-2 px-3 text-[var(--text-color)] font-medium"><span className="truncate max-w-[280px] block text-[10px]" title={formatDecodedSignals(log.decodedSignals, activeDbcName)}>{formatDecodedSignals(log.decodedSignals, activeDbcName)}</span></td>}
                       <td className="py-2 px-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
@@ -945,16 +947,22 @@ export const LiveViewer: React.FC = () => {
                                         const bitMask = 1 << bitPos;
                                         const isBitSet = (byteVal & bitMask) !== 0;
                                         const globalBitIdx = byteIdx * 8 + bitPos;
+                                        const isTracked = trackedBits.some(
+                                          tb => tb.msgId === log.id && tb.byteIdx === byteIdx && tb.bitIdx === bitPos
+                                        );
 
                                         return (
                                           <div
                                             key={`${byteIdx}-${bitIdx}`}
-                                            className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold cursor-help transition-all select-none border ${
-                                              isBitSet
-                                                ? 'bg-cyber-accent/20 border-cyber-accent/50 text-cyber-accent shadow-sm glow-accent'
-                                                : 'bg-[var(--bg-card-sub)] border-[var(--border-color)]/60 text-[var(--text-muted)]/60'
+                                            onClick={() => toggleTrackBit(log.id, byteIdx, bitPos)}
+                                            className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold cursor-pointer transition-all select-none border ${
+                                              isTracked
+                                                ? 'bg-blue-500/30 border-blue-400 text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.6)] scale-105'
+                                                : isBitSet
+                                                  ? 'bg-cyber-accent/20 border-cyber-accent/50 text-cyber-accent shadow-sm glow-accent'
+                                                  : 'bg-[var(--bg-card-sub)] border-[var(--border-color)]/60 text-[var(--text-muted)]/60'
                                             }`}
-                                            title={`Global Bit ${globalBitIdx} (Byte ${byteIdx}, Bit ${bitPos})`}
+                                            title={`Global Bit ${globalBitIdx} (Byte ${byteIdx}, Bit ${bitPos}) ${isTracked ? '[TRACKED]' : '[Click to Track]'}`}
                                           >
                                             {isBitSet ? '1' : '0'}
                                           </div>

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Multi-Window Simulator Pop-out**: Virtual CAN simulator can now be popped out into a separate window with full state sync via Tauri event broadcasts and `localStorage`.
+- **False CAN Traffic Mimic Mode**: Simulated nodes can now bind to DBC nodes to dynamically emulate cyclical CAN frames using sine-wave telemetry curves bounded by DBC ranges.
+- **J1939 Builder helpers**: Integrated SA/PGN/DA/Priority helpers in the custom message modal and source address dropdown helpers mapping to logical project nodes.
+- **Line Chart Plotter Enhancements**: Added stable Y-axis scaling presets (Auto-fit, DBC Limits, Manual), X-axis zoom selectors, and the ability to Pause/Resume chart scroll.
+- **64-Bit Click Matrix**: Clicking on individual cells in the expanded row bit-matrix now highlights them in cyber blue and automatically plots their binary states in the plotter.
+
+### Fixed
+- **Time Columns Reset**: Cleans and resets simulator relative time to `0.000s` when clearing log traffic.
+- **Responsive Table Layouts**: Table columns (DLC, Delta, Source Device, Direction) hide automatically on narrow panels via CSS container queries.
+- **DBC Signal Encoder Reset**: Automatically resets selected message ID to a valid entry on protocol or DBC changes, preventing empty states or lockups.
+
 ## [0.0.7] - 2026-06-09
 
 ### Added

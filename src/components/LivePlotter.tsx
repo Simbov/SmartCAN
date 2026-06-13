@@ -1,11 +1,20 @@
 import React, { useMemo } from 'react';
 import { useStore } from '../store/useStore';
-import { LineChart, Trash2 } from 'lucide-react';
+import { LineChart } from 'lucide-react';
 
 const COLORS = ['#10b981', '#06b6d4', '#f59e0b', '#a855f7', '#ec4899', '#3b82f6'];
 
 export const LivePlotter: React.FC = () => {
-  const { plotPoints, plotSignals, clearPlotHistory, protocol } = useStore();
+  const { plotPoints, plotSignals, clearPlotHistory, protocol, dbcs } = useStore();
+
+  const [isPaused, setIsPaused] = React.useState(false);
+  const [pausedPoints, setPausedPoints] = React.useState<typeof plotPoints>([]);
+  const [xWindow, setXWindow] = React.useState<number | 'all'>('all');
+  const [yMode, setYMode] = React.useState<'dbc' | 'auto' | 'manual'>('auto');
+  const [manualMinY, setManualMinY] = React.useState('0');
+  const [manualMaxY, setManualMaxY] = React.useState('100');
+
+  const displayedPoints = isPaused ? pausedPoints : plotPoints;
 
   // Width and height of the SVG viewport
   const width = 600;
@@ -20,48 +29,94 @@ export const LivePlotter: React.FC = () => {
   const chartWidth = width - paddingLeft - paddingRight;
   const chartHeight = height - paddingTop - paddingBottom;
 
+  // Filter points based on X time window preset
+  const pointsFilteredByX = useMemo(() => {
+    if (xWindow === 'all' || displayedPoints.length === 0) return displayedPoints;
+    const latestT = displayedPoints[displayedPoints.length - 1].timestamp;
+    const threshold = latestT - xWindow * 1000;
+    return displayedPoints.filter(p => p.timestamp >= threshold);
+  }, [displayedPoints, xWindow]);
+
+  // Retrieve min/max limits for selected signals from active DBC databases
+  const signalLimits = useMemo(() => {
+    const limits: Record<string, { min: number; max: number }> = {};
+    plotSignals.forEach(sigName => {
+      for (const db of Object.values(dbcs)) {
+        for (const msg of Object.values(db.messages)) {
+          const foundSig = msg.signals.find(s => s.name === sigName);
+          if (foundSig) {
+            limits[sigName] = {
+              min: foundSig.min ?? 0,
+              max: foundSig.max ?? 100
+            };
+            break;
+          }
+        }
+        if (limits[sigName]) break;
+      }
+      if (!limits[sigName]) {
+        if (sigName.startsWith('0x')) {
+          limits[sigName] = { min: 0, max: 1 };
+        } else {
+          limits[sigName] = { min: 0, max: 100 };
+        }
+      }
+    });
+    return limits;
+  }, [dbcs, plotSignals]);
+
   // Process data points and map bounds
   const chartDetails = useMemo(() => {
-    if (plotPoints.length < 2 || plotSignals.length === 0) {
+    if (pointsFilteredByX.length < 2 || plotSignals.length === 0) {
       return null;
     }
 
     // Min / Max X (Time)
-    const times = plotPoints.map(p => p.timestamp);
+    const times = pointsFilteredByX.map(p => p.timestamp);
     const minX = times[0];
     const maxX = times[times.length - 1];
     const dx = maxX - minX || 1;
 
-    // Min / Max Y across all selected signals
+    // Determine Y bounds based on active scale mode
     let minY = Infinity;
     let maxY = -Infinity;
 
-    plotPoints.forEach(pt => {
-      plotSignals.forEach(sig => {
-        const val = pt.values[sig];
-        if (val !== undefined) {
-          if (val < minY) minY = val;
-          if (val > maxY) maxY = val;
+    if (yMode === 'dbc') {
+      plotSignals.forEach(sigName => {
+        const lim = signalLimits[sigName];
+        if (lim) {
+          if (lim.min < minY) minY = lim.min;
+          if (lim.max > maxY) maxY = lim.max;
         }
       });
-    });
-
-    if (minY === Infinity) {
-      minY = 0;
-      maxY = 100;
+    } else if (yMode === 'manual') {
+      minY = parseFloat(manualMinY) || 0;
+      maxY = parseFloat(manualMaxY) || 100;
+    } else {
+      pointsFilteredByX.forEach(pt => {
+        plotSignals.forEach(sig => {
+          const val = pt.values[sig];
+          if (val !== undefined) {
+            if (val < minY) minY = val;
+            if (val > maxY) maxY = val;
+          }
+        });
+      });
+      if (minY === Infinity) {
+        minY = 0;
+        maxY = 100;
+      }
+      const dy = maxY - minY || 1;
+      minY -= dy * 0.05;
+      maxY += dy * 0.05;
     }
-
-    // Pad Y axis slightly
-    const dy = maxY - minY || 1;
-    minY -= dy * 0.05;
-    maxY += dy * 0.05;
-    const finalDy = maxY - minY;
+    const finalDy = maxY - minY || 1;
 
     // Build SVG paths for each signal
     const paths = plotSignals.map((sigName, sigIdx) => {
       const color = COLORS[sigIdx % COLORS.length];
       
-      const coords = plotPoints
+      const coords = pointsFilteredByX
         .map(pt => {
           const val = pt.values[sigName];
           if (val === undefined) return null;
@@ -88,7 +143,7 @@ export const LivePlotter: React.FC = () => {
       maxY,
       paths
     };
-  }, [plotPoints, plotSignals, chartWidth, chartHeight]);
+  }, [pointsFilteredByX, plotSignals, yMode, signalLimits, manualMinY, manualMaxY, chartWidth, chartHeight]);
 
   // Generate grid tick values
   const yTicks = useMemo(() => {
@@ -116,21 +171,11 @@ export const LivePlotter: React.FC = () => {
   return (
     <div className="glass-panel p-4 flex flex-col h-full overflow-hidden">
       {/* Title Header */}
-      <div className="flex items-center justify-between mb-3 pb-2 border-b border-[var(--border-color)]">
+      <div className="flex items-center justify-between mb-3 pb-2 border-b border-[var(--border-color)] shrink-0">
         <div className="flex items-center gap-2">
           <LineChart className={`w-4 h-4 ${protocol === 'j1939' ? 'text-cyber-j1939' : 'text-cyber-canopen'}`} />
           <span className="font-semibold text-[var(--text-color)] text-sm">Real-Time Signal Plotter</span>
         </div>
-        {plotPoints.length > 0 && (
-          <button
-            onClick={clearPlotHistory}
-            className="text-[10px] text-[var(--text-muted)] hover:text-red-500 font-semibold flex items-center gap-1 transition-all active:scale-95"
-            title="Reset Chart Data"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Reset Data
-          </button>
-        )}
       </div>
 
       {plotSignals.length === 0 ? (
@@ -149,11 +194,97 @@ export const LivePlotter: React.FC = () => {
         </div>
       ) : (
         <div className="flex-1 flex flex-col justify-between overflow-hidden">
+          {/* Controls Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-[var(--bg-card-sub)] p-2 border border-[var(--border-sub)] text-xs mb-3 rounded-lg shrink-0">
+            {/* Pause & Clear */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  if (!isPaused) {
+                    setPausedPoints(plotPoints);
+                  }
+                  setIsPaused(!isPaused);
+                }}
+                className={`px-3 py-1 rounded text-xs font-semibold border transition-all active:scale-95 ${
+                  isPaused
+                    ? 'bg-red-500/10 border-red-500/30 text-red-400 font-bold'
+                    : 'bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-color)] font-bold'
+                }`}
+              >
+                {isPaused ? '▶ Resume' : '⏸ Pause'}
+              </button>
+              <button
+                onClick={() => {
+                  clearPlotHistory();
+                  setPausedPoints([]);
+                  setIsPaused(false);
+                }}
+                className="px-3 py-1 bg-red-600/10 border border-red-500/20 hover:bg-red-600/20 text-red-400 font-bold text-xs rounded transition-all active:scale-95"
+              >
+                Reset Data
+              </button>
+            </div>
+
+            {/* X Window Presets */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase">X Window:</span>
+              <div className="flex bg-[var(--bg-input)] rounded border border-[var(--border-color)] p-0.5">
+                {([2, 5, 10, 30, 'all'] as const).map(w => (
+                  <button
+                    key={w}
+                    onClick={() => setXWindow(w)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all ${
+                      xWindow === w
+                        ? 'bg-[var(--bg-card)] text-[var(--text-color)] shadow border border-[var(--border-sub)]'
+                        : 'text-[var(--text-muted)] hover:text-[var(--text-color)]'
+                    }`}
+                  >
+                    {w === 'all' ? 'All' : `${w}s`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Y Scaling Mode */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase">Y Scaling:</span>
+              <select
+                value={yMode}
+                onChange={e => setYMode(e.target.value as any)}
+                className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-2 py-0.5 text-[10px] focus:outline-none"
+              >
+                <option value="auto">Auto-fit</option>
+                <option value="dbc">DBC Limits</option>
+                <option value="manual">Manual</option>
+              </select>
+
+              {yMode === 'manual' && (
+                <div className="flex items-center gap-1 ml-1 animate-fade-in">
+                  <input
+                    type="number"
+                    value={manualMinY}
+                    onChange={e => setManualMinY(e.target.value)}
+                    className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-1.5 w-12 py-0.5 text-[10px] font-mono text-center"
+                    placeholder="Min"
+                  />
+                  <span className="text-[9px] text-[var(--text-muted)]">to</span>
+                  <input
+                    type="number"
+                    value={manualMaxY}
+                    onChange={e => setManualMaxY(e.target.value)}
+                    className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-1.5 w-12 py-0.5 text-[10px] font-mono text-center"
+                    placeholder="Max"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Plotter Legend */}
-          <div className="flex flex-wrap gap-x-4 gap-y-2 mb-3.5 bg-[var(--bg-card-sub)] p-2 rounded border border-[var(--border-sub)]">
+          <div className="flex flex-wrap gap-x-4 gap-y-2 mb-3.5 bg-[var(--bg-card-sub)] p-2 rounded border border-[var(--border-sub)] shrink-0">
             {plotSignals.map((sigName, idx) => {
               const color = COLORS[idx % COLORS.length];
-              const lastVal = plotPoints[plotPoints.length - 1]?.values[sigName];
+              const lastVal = pointsFilteredByX[pointsFilteredByX.length - 1]?.values[sigName];
               
               return (
                 <div key={sigName} className="flex items-center gap-2 text-xs font-semibold">
@@ -171,7 +302,7 @@ export const LivePlotter: React.FC = () => {
           </div>
 
           {/* Responsive SVG Chart */}
-          <div className="flex-1 min-h-[160px] relative w-full bg-[var(--bg-input)] rounded border border-[var(--border-sub)]">
+          <div className="flex-1 min-h-[160px] relative w-full bg-[var(--bg-input)] rounded border border-[var(--border-sub)] overflow-hidden">
             <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full text-[10px] font-mono text-[var(--text-muted)] overflow-visible">
               
               {/* Y Axis Gridlines and Ticks */}

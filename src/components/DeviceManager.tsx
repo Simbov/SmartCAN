@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useStore } from '../store/useStore';
 import { Cpu, Plus, ToggleLeft, ToggleRight, Trash2, Sliders, EyeOff, Edit } from 'lucide-react';
 import { encodeFrame, decodeFrame } from '../lib/dbcParser';
+import { buildJ1939Id, parseJ1939Id } from '../lib/j1939';
 
 export const DeviceManager: React.FC = () => {
   const {
@@ -36,6 +37,48 @@ export const DeviceManager: React.FC = () => {
   const [msgDataHex, setMsgDataHex] = useState('0000000000000000');
   const [msgInterval, setMsgInterval] = useState(500);
 
+  // Modal J1939 builder state
+  const [modalJ1939Priority, setModalJ1939Priority] = useState(6);
+  const [modalJ1939PgnHex, setModalJ1939PgnHex] = useState('F004');
+  const [modalJ1939Sa, setModalJ1939Sa] = useState(1);
+  const [modalJ1939Da, setModalJ1939Da] = useState(255);
+
+  const availableDbcNodes = React.useMemo(() => {
+    const nodesSet = new Set<string>();
+    Object.values(dbcs).forEach(db => {
+      if (db.nodes) {
+        db.nodes.forEach(node => nodesSet.add(node));
+      }
+    });
+    return Array.from(nodesSet);
+  }, [dbcs]);
+
+  const syncModalJ1939ToHex = (pri: number, pgnStr: string, sa: number, da: number) => {
+    const cleanPgn = pgnStr.replace(/[^0-9A-Fa-f]/g, '');
+    const pgn = (pgnStr.toLowerCase().startsWith('0x') || isNaN(Number(pgnStr)))
+      ? (parseInt(cleanPgn, 16) || 0)
+      : (parseInt(cleanPgn, 10) || 0);
+
+    const compiled = buildJ1939Id(pri, pgn, sa, da);
+    setMsgHexId(compiled.toString(16).toUpperCase());
+  };
+
+  const handleModalHexIdChange = (val: string) => {
+    setMsgHexId(val);
+    const parsed = parseInt(val, 16);
+    if (!isNaN(parsed) && protocol === 'j1939') {
+      try {
+        const details = parseJ1939Id(parsed);
+        setModalJ1939Priority(details.priority);
+        setModalJ1939PgnHex(details.pgn.toString(16).toUpperCase());
+        setModalJ1939Sa(details.sa);
+        setModalJ1939Da(details.da ?? 255);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  };
+
   const activeDbc = dbcs[activeDbcName];
 
   const handleCreateDevice = (e: React.FormEvent) => {
@@ -66,11 +109,22 @@ export const DeviceManager: React.FC = () => {
     const msgId = parseInt(msgIdStr, 10);
     const templateDbc = dbcs[dbcName];
     const templateMsg = templateDbc?.messages[msgId];
-
     if (templateMsg) {
       setMsgName(templateMsg.name);
       setMsgHexId(templateMsg.id.toString(16).toUpperCase());
       setMsgDlc(templateMsg.dlc || 8);
+
+      if (protocol === 'j1939') {
+        try {
+          const details = parseJ1939Id(templateMsg.id);
+          setModalJ1939Priority(details.priority);
+          setModalJ1939PgnHex(details.pgn.toString(16).toUpperCase());
+          setModalJ1939Sa(details.sa);
+          setModalJ1939Da(details.da ?? 255);
+        } catch (e) {
+          console.error(e);
+        }
+      }
 
       // Initialize signal values
       const initVals: Record<string, number> = {};
@@ -144,6 +198,18 @@ export const DeviceManager: React.FC = () => {
     setMsgDlc(msg.dlc);
     setMsgInterval(msg.interval);
 
+    if (protocol === 'j1939') {
+      try {
+        const details = parseJ1939Id(msg.id);
+        setModalJ1939Priority(details.priority);
+        setModalJ1939PgnHex(details.pgn.toString(16).toUpperCase());
+        setModalJ1939Sa(details.sa);
+        setModalJ1939Da(details.da ?? 255);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
     const hex = Array.from(msg.data as Uint8Array).map(b => b.toString(16).padStart(2, '0')).join('');
     setMsgDataHex(hex);
 
@@ -178,6 +244,10 @@ export const DeviceManager: React.FC = () => {
     setMsgDlc(8);
     setMsgDataHex('0000000000000000');
     setMsgInterval(500);
+    setModalJ1939Priority(6);
+    setModalJ1939PgnHex('F004');
+    setModalJ1939Sa(1);
+    setModalJ1939Da(255);
   };
 
   const handleCreateCustomMessage = (e: React.FormEvent) => {
@@ -362,17 +432,37 @@ export const DeviceManager: React.FC = () => {
                 </div>
 
                 {/* Sub configuration options */}
-                <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)] bg-[var(--bg-input)] p-1.5 rounded border border-[var(--border-sub)] mb-2.5">
-                  <span>Simulation logic:</span>
-                  <label className="flex items-center gap-1 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={dev.isSimulated}
-                      onChange={e => updateDevice(dev.id, { isSimulated: e.target.checked })}
-                      className="rounded bg-black/10 border-[var(--border-color)]"
-                    />
-                    <span>Active (False CAN)</span>
-                  </label>
+                <div className="space-y-2 mb-2.5">
+                  <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)] bg-[var(--bg-input)] p-1.5 rounded border border-[var(--border-sub)]">
+                    <span>Simulation logic:</span>
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={dev.isSimulated}
+                        onChange={e => updateDevice(dev.id, { isSimulated: e.target.checked })}
+                        className="rounded bg-black/10 border-[var(--border-color)]"
+                      />
+                      <span>Active (False CAN)</span>
+                    </label>
+                  </div>
+
+                  {dev.isSimulated && availableDbcNodes.length > 0 && (
+                    <div className="flex items-center justify-between gap-2 text-[10px] text-[var(--text-muted)] bg-[var(--bg-input)] p-1.5 rounded border border-[var(--border-sub)]">
+                      <span>Mimic DBC Node:</span>
+                      <select
+                        value={dev.mimicDbcNode || ''}
+                        onChange={e => updateDevice(dev.id, { mimicDbcNode: e.target.value || undefined })}
+                        className="glass-input text-[10px] px-1 py-0.5 max-w-[120px] pr-4 font-semibold"
+                      >
+                        <option value="">-- None (Manual) --</option>
+                        {availableDbcNodes.map(node => (
+                          <option key={node} value={node}>
+                            {node}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 {/* Custom messages on device */}
@@ -453,11 +543,84 @@ export const DeviceManager: React.FC = () => {
                     <input
                       type="text"
                       value={msgHexId}
-                      onChange={e => setMsgHexId(e.target.value)}
-                      className="glass-input w-full text-xs"
+                      onChange={e => handleModalHexIdChange(e.target.value)}
+                      className="glass-input w-full text-xs font-mono"
                       required
                     />
                   </div>
+
+                  {protocol === 'j1939' && (
+                    <div className="bg-[var(--bg-card-sub)] border border-[var(--border-color)] rounded p-2.5 space-y-2">
+                      <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-wider block">J1939 Identifier Builder</span>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        <div>
+                          <label className="block text-[8px] font-semibold text-[var(--text-muted)] mb-0.5">Priority</label>
+                          <select
+                            value={modalJ1939Priority}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setModalJ1939Priority(val);
+                              syncModalJ1939ToHex(val, modalJ1939PgnHex, modalJ1939Sa, modalJ1939Da);
+                            }}
+                            className="glass-input text-[9px] px-1 py-0.5 w-full font-semibold"
+                          >
+                            {Array.from({ length: 8 }, (_, i) => (
+                              <option key={i} value={i}>
+                                {i}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[8px] font-semibold text-[var(--text-muted)] mb-0.5">PGN</label>
+                          <input
+                            type="text"
+                            value={modalJ1939PgnHex}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setModalJ1939PgnHex(val);
+                              syncModalJ1939ToHex(modalJ1939Priority, val, modalJ1939Sa, modalJ1939Da);
+                            }}
+                            placeholder="F004"
+                            className="glass-input text-[9px] px-1 py-0.5 w-full font-mono"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[8px] font-semibold text-[var(--text-muted)] mb-0.5">SA (Src)</label>
+                          <input
+                            type="number"
+                            value={modalJ1939Sa}
+                            onChange={(e) => {
+                              const val = Math.max(0, Math.min(253, Number(e.target.value)));
+                              setModalJ1939Sa(val);
+                              syncModalJ1939ToHex(modalJ1939Priority, modalJ1939PgnHex, val, modalJ1939Da);
+                            }}
+                            min={0}
+                            max={253}
+                            className="glass-input text-[9px] px-1 py-0.5 w-full font-mono"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[8px] font-semibold text-[var(--text-muted)] mb-0.5">DA (Dest)</label>
+                          <input
+                            type="number"
+                            value={modalJ1939Da}
+                            onChange={(e) => {
+                              const val = Math.max(0, Math.min(255, Number(e.target.value)));
+                              setModalJ1939Da(val);
+                              syncModalJ1939ToHex(modalJ1939Priority, modalJ1939PgnHex, modalJ1939Sa, val);
+                            }}
+                            min={0}
+                            max={255}
+                            className="glass-input text-[9px] px-1 py-0.5 w-full font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">Message Name</label>
                     <input

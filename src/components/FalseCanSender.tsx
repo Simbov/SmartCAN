@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
-import { Zap, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Zap, ToggleLeft, ToggleRight, ExternalLink } from 'lucide-react';
 
 export const FalseCanSender: React.FC = () => {
   const { protocol, isSimulating, startSimulation, stopSimulation } = useStore();
@@ -15,6 +15,8 @@ export const FalseCanSender: React.FC = () => {
   const [offset, setOffset] = useState(2000);
 
   const [animationTime, setAnimationTime] = useState(0);
+
+  const isSimulatorWindow = typeof window !== 'undefined' && window.location.search.includes('window=simulator');
 
   React.useEffect(() => {
     if (!isSimulating) return;
@@ -39,6 +41,26 @@ export const FalseCanSender: React.FC = () => {
     }
   };
 
+  const handlePopOut = async () => {
+    try {
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+      const webview = new WebviewWindow('simulator', {
+        url: 'index.html?window=simulator',
+        title: 'SmartCAN - false oscillo-simulator',
+        width: 1000,
+        height: 700,
+      });
+      webview.once('tauri://created', function () {
+        console.log('Simulator window created');
+      });
+      webview.once('tauri://error', function (e) {
+        console.error('Failed to create simulator window:', e);
+      });
+    } catch (err) {
+      console.error('Failed to load Tauri WebviewWindow:', err);
+    }
+  };
+
   return (
     <div className="glass-panel p-4 flex flex-col h-full overflow-hidden">
       {/* Panel header */}
@@ -48,17 +70,28 @@ export const FalseCanSender: React.FC = () => {
           <span className="font-semibold text-[var(--text-color)] text-sm">False CAN Traffic Simulator</span>
         </div>
 
-        <button
-          onClick={handleToggleSimulation}
-          className="text-[var(--text-muted)] hover:text-[var(--text-color)]"
-          title={isSimulating ? 'Stop Simulator' : 'Start Simulator'}
-        >
-          {isSimulating ? (
-            <ToggleRight className="w-7.5 h-7.5 text-cyber-accent" />
-          ) : (
-            <ToggleLeft className="w-7.5 h-7.5" />
+        <div className="flex items-center gap-3">
+          {!isSimulatorWindow && (
+            <button
+              onClick={handlePopOut}
+              className="p-1 text-[var(--text-muted)] hover:text-cyber-accent transition-colors"
+              title="Open Simulator in Separate Window"
+            >
+              <ExternalLink className="w-4 h-4" />
+            </button>
           )}
-        </button>
+          <button
+            onClick={handleToggleSimulation}
+            className="text-[var(--text-muted)] hover:text-[var(--text-color)]"
+            title={isSimulating ? 'Stop Simulator' : 'Start Simulator'}
+          >
+            {isSimulating ? (
+              <ToggleRight className="w-7.5 h-7.5 text-cyber-accent" />
+            ) : (
+              <ToggleLeft className="w-7.5 h-7.5" />
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Connection warning */}

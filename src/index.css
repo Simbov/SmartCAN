@@ -130,3 +130,14 @@
   width: 100vw;
   height: 100vh;
 }
+
+/* Container Query for Live CAN Bus Traffic panel width-based responsiveness */
+.live-viewer-container {
+  container-type: inline-size;
+}
+
+@container (max-width: 700px) {
+  .col-hide-narrow {
+    display: none !important;
+  }
+}

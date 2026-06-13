@@ -71,19 +71,29 @@ export const CanTransmitter: React.FC = () => {
 
   // Set default DBC message when DBC list changes
   useEffect(() => {
-    if (dbcMessages.length > 0 && selectedMsgId === 0) {
-      const firstMsg = dbcMessages[0];
-      
-      // Initialize signal values to min or default
-      const initVals: Record<string, number> = {};
-      firstMsg.signals.forEach(sig => {
-        initVals[sig.name] = sig.min || 0;
-      });
+    if (dbcMessages.length > 0) {
+      const exists = dbcMessages.some(m => m.id === selectedMsgId);
+      if (!exists) {
+        const firstMsg = dbcMessages[0];
+        
+        // Initialize signal values to min or default
+        const initVals: Record<string, number> = {};
+        firstMsg.signals.forEach(sig => {
+          initVals[sig.name] = sig.min || 0;
+        });
 
-      setTimeout(() => {
-        setSelectedMsgId(firstMsg.id);
-        setSignalValues(initVals);
-      }, 0);
+        setTimeout(() => {
+          setSelectedMsgId(firstMsg.id);
+          setSignalValues(initVals);
+        }, 0);
+      }
+    } else {
+      if (selectedMsgId !== 0) {
+        setTimeout(() => {
+          setSelectedMsgId(0);
+          setSignalValues({});
+        }, 0);
+      }
     }
   }, [activeDbcName, dbcMessages, selectedMsgId]);
 
@@ -383,6 +393,24 @@ export const CanTransmitter: React.FC = () => {
         /* DBC-Driven Transmission Section */
         <div className="flex-1 flex flex-col justify-between overflow-hidden">
           <div className="flex-1 flex flex-col overflow-hidden gap-3.5">
+            {/* Active DBC Database Selector */}
+            {Object.keys(dbcs).length > 1 && (
+              <div>
+                <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">Select Active DBC Database</label>
+                <select
+                  value={activeDbcName}
+                  onChange={e => useStore.getState().setActiveDbcName(e.target.value)}
+                  className="glass-input w-full pr-4 text-xs font-semibold"
+                >
+                  {Object.keys(dbcs).map(name => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {/* DBC Message Selector */}
             <div>
               <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">Select Message template</label>

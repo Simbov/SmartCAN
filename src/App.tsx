@@ -318,6 +318,36 @@ const App: React.FC = () => {
     setDragOverTargetKey(null);
   };
 
+  const isSimulatorWindow = typeof window !== 'undefined' && window.location.search.includes('window=simulator');
+
+  if (isSimulatorWindow) {
+    return (
+      <div className="w-full h-full flex flex-col bg-[var(--bg-color)] text-[var(--text-color)] transition-colors duration-200 overflow-hidden">
+        {/* Title Bar */}
+        <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border-color)] bg-black/10 backdrop-blur-md shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-cyber-accent animate-pulse" />
+            <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-color)]">SmartCAN Independent Simulator</span>
+          </div>
+          <span className="text-[10px] text-[var(--text-muted)] font-mono">localStorage Synced</span>
+        </div>
+
+        {/* Side-by-Side Split View */}
+        <div className="flex-1 flex overflow-hidden min-h-0 p-4 gap-4 divide-x divide-[var(--border-color)]">
+          <div className="flex-1 overflow-y-auto pr-2 h-full">
+            <DeviceManager />
+          </div>
+          <div className="flex-1 overflow-y-auto pl-4 h-full">
+            <FalseCanSender />
+          </div>
+        </div>
+        
+        {/* Connection Error Modal Overlay */}
+        <ConnectionErrorModal />
+      </div>
+    );
+  }
+
   return (
     <div className="w-full h-full flex flex-col bg-[var(--bg-color)] text-[var(--text-color)] transition-colors duration-200">
       {/* 1. Header connection bar */}
