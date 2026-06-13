@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-06-13
+
 ### Added
 - **Multi-Window Simulator Pop-out**: Virtual CAN simulator can now be popped out into a separate window with full state sync via Tauri event broadcasts and `localStorage`.
 - **False CAN Traffic Mimic Mode**: Simulated nodes can now bind to DBC nodes to dynamically emulate cyclical CAN frames using sine-wave telemetry curves bounded by DBC ranges.
