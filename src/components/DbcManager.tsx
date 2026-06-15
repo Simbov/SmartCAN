@@ -23,6 +23,101 @@ import {
 } from 'lucide-react';
 import { saveTextFile } from '../lib/tauriAdapter';
 
+function sanitizeDbcNameForNode(name: string): string {
+  let nodeName = name.trim().replace(/\.dbc$/i, '').replace(/[^a-zA-Z0-9_]/g, '_');
+  if (!/^[a-zA-Z_]/.test(nodeName)) {
+    nodeName = '_' + nodeName;
+  }
+  return nodeName;
+}
+
+interface SignalValueDescriptionsProps {
+  valueDescriptions: Record<number, string> | undefined;
+  onChange: (newDescriptions: Record<number, string>) => void;
+}
+
+const SignalValueDescriptions: React.FC<SignalValueDescriptionsProps> = ({ valueDescriptions = {}, onChange }) => {
+  const [newValue, setNewValue] = useState('');
+  const [newDesc, setNewDesc] = useState('');
+
+  const handleAdd = () => {
+    const val = parseInt(newValue.trim(), 10);
+    const desc = newDesc.trim();
+    if (isNaN(val)) {
+      alert('Value must be a valid integer.');
+      return;
+    }
+    if (!desc) {
+      alert('Description cannot be empty.');
+      return;
+    }
+    const updated = { ...valueDescriptions, [val]: desc };
+    onChange(updated);
+    setNewValue('');
+    setNewDesc('');
+  };
+
+  const handleRemove = (valKey: string) => {
+    const updated = { ...valueDescriptions };
+    delete updated[parseInt(valKey, 10)];
+    onChange(updated);
+  };
+
+  const entries = Object.entries(valueDescriptions).sort((a, b) => parseInt(a[0], 10) - parseInt(b[0], 10));
+
+  return (
+    <div className="mt-3 border-t border-[var(--border-sub)] pt-2 flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-wider">Value Descriptions (VAL_)</span>
+      </div>
+      
+      {/* Existing entries */}
+      {entries.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 max-h-[100px] overflow-y-auto p-1 bg-[var(--bg-input)] rounded border border-[var(--border-color)]">
+          {entries.map(([val, desc]) => (
+            <div key={val} className="flex items-center gap-1.5 px-2 py-0.5 bg-[var(--bg-card)] border border-[var(--border-sub)] rounded text-[10px]">
+              <span className="font-mono font-bold text-sky-600 dark:text-sky-400">{val}:</span>
+              <span className="text-[var(--text-color)]">{desc}</span>
+              <button
+                type="button"
+                onClick={() => handleRemove(val)}
+                className="text-red-400 hover:text-red-600 ml-1 font-bold"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add new entry */}
+      <div className="flex gap-2 items-center">
+        <input
+          type="number"
+          placeholder="Val"
+          value={newValue}
+          onChange={(e) => setNewValue(e.target.value)}
+          className="glass-input py-0.5 px-2 text-[10px] font-mono w-16"
+        />
+        <input
+          type="text"
+          placeholder="Description (e.g. Active)"
+          value={newDesc}
+          onChange={(e) => setNewDesc(e.target.value)}
+          className="glass-input py-0.5 px-2 text-[10px] flex-1"
+        />
+        <button
+          type="button"
+          onClick={handleAdd}
+          className="px-2.5 py-0.5 bg-sky-500 hover:bg-sky-600 text-white rounded text-[10px] font-semibold active:scale-95 transition-all"
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  );
+};
+
 export const DbcManager: React.FC = () => {
   const {
     projects,
@@ -39,7 +134,8 @@ export const DbcManager: React.FC = () => {
     updateDbc,
     saveSmartCanFile,
     loadSmartCanFile,
-    createEmptyDbc
+    createEmptyDbc,
+    showToast
   } = useStore();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -51,6 +147,8 @@ export const DbcManager: React.FC = () => {
   const [customOpen, setCustomOpen] = useState(true);
   const [genericOpen, setGenericOpen] = useState(true);
   const [deviceOpen, setDeviceOpen] = useState(true);
+
+
 
   const dbcFileInputRef = useRef<HTMLInputElement>(null);
   const smartcanFileInputRef = useRef<HTMLInputElement>(null);
@@ -169,7 +267,11 @@ export const DbcManager: React.FC = () => {
     });
 
     const filename = `can_specification_${inspectedDbcName.replace(/\s+/g, '_')}.csv`;
-    saveTextFile(filename, csv, [{ name: 'CSV CAN Specification', extensions: ['csv'] }]);
+    saveTextFile(filename, csv, [{ name: 'CSV CAN Specification', extensions: ['csv'] }]).then(success => {
+      if (success) {
+        showToast(`Successfully exported specification: ${filename}`, 'success');
+      }
+    });
   };
 
   const selectedMsg = inspectedDbc && selectedMsgId ? inspectedDbc.messages[selectedMsgId] : null;
@@ -204,9 +306,39 @@ export const DbcManager: React.FC = () => {
   const [newMsgDlc, setNewMsgDlc] = useState(8);
   const [newMsgSender, setNewMsgSender] = useState('Vector__XXX');
   const [newMsgPgn, setNewMsgPgn] = useState('');
-  const [newMsgPriority, setNewMsgPriority] = useState(6);
-  const [newMsgSourceAddress, setNewMsgSourceAddress] = useState(0);
+  const [newMsgPriority, setNewMsgPriority] = useState<number | ''>('');
+  const [newMsgSourceAddress, setNewMsgSourceAddress] = useState<number | ''>('');
   const [newMsgDestinationAddress, setNewMsgDestinationAddress] = useState(255);
+
+  React.useEffect(() => {
+    if (inspectedEntry && draftDb) {
+      if (inspectedEntry.type === 'device') {
+        const devNodeName = sanitizeDbcNameForNode(inspectedEntry.name);
+        if (!draftDb.nodes.includes(devNodeName)) {
+          setDraftDb(prev => {
+            if (!prev) return prev;
+            if (prev.nodes.includes(devNodeName)) return prev;
+            return {
+              ...prev,
+              nodes: [...prev.nodes, devNodeName]
+            };
+          });
+        }
+      }
+    }
+  }, [inspectedEntry, draftDb]);
+
+  React.useEffect(() => {
+    if (inspectedEntry) {
+      const targetSender = inspectedEntry.type === 'device'
+        ? sanitizeDbcNameForNode(inspectedEntry.name)
+        : 'Vector__XXX';
+      const timer = setTimeout(() => {
+        setNewMsgSender(targetSender);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [inspectedEntry]);
 
   const handleAddNode = () => {
     const trimmed = newNodeName.trim().replace(/\s+/g, '_');
@@ -253,12 +385,12 @@ export const DbcManager: React.FC = () => {
         alert('PGN must be a valid number (e.g. 61444 or 0xF004).');
         return;
       }
-      const sa = Math.max(0, Math.min(253, newMsgSourceAddress));
+      const sa = newMsgSourceAddress === '' ? 0 : Math.max(0, Math.min(253, Number(newMsgSourceAddress)));
       
       const pf = (parsedPgn >> 8) & 0xFF;
       const isP2P = pf < 240;
       const da = isP2P ? Math.max(0, Math.min(255, newMsgDestinationAddress)) : 255;
-      const priority = Math.max(0, Math.min(7, newMsgPriority));
+      const priority = newMsgPriority === '' ? 6 : Math.max(0, Math.min(7, Number(newMsgPriority)));
 
       parsedId = buildJ1939Id(priority, parsedPgn, sa, da);
     } else {
@@ -296,8 +428,8 @@ export const DbcManager: React.FC = () => {
     setNewMsgDlc(8);
     setNewMsgSender('Vector__XXX');
     setNewMsgPgn('');
-    setNewMsgPriority(6);
-    setNewMsgSourceAddress(0);
+    setNewMsgPriority('');
+    setNewMsgSourceAddress('');
     setNewMsgDestinationAddress(255);
   };
 
@@ -475,7 +607,11 @@ export const DbcManager: React.FC = () => {
             onClick={(e) => {
               e.stopPropagation();
               const filename = entry.name.endsWith('.dbc') ? entry.name : `${entry.name}.dbc`;
-              saveTextFile(filename, entry.content, [{ name: 'CAN Database File', extensions: ['dbc'] }]);
+              saveTextFile(filename, entry.content, [{ name: 'CAN Database File', extensions: ['dbc'] }]).then(success => {
+                if (success) {
+                  showToast(`Successfully exported database: ${filename}`, 'success');
+                }
+              });
             }}
             className="p-1 text-[var(--text-muted)] hover:text-sky-500 dark:hover:text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
             title={`Export/Save ${entry.name} as .dbc File`}
@@ -1106,12 +1242,16 @@ export const DbcManager: React.FC = () => {
                                         />
                                       </div>
                                       <div className="flex flex-col gap-1">
-                                        <label className="text-[10px] text-[var(--text-muted)] font-bold">Priority (0-7)</label>
+                                        <label className="text-[10px] text-[var(--text-muted)] font-bold">Priority (Optional)</label>
                                         <select
                                           value={newMsgPriority}
-                                          onChange={(e) => setNewMsgPriority(parseInt(e.target.value, 10))}
+                                          onChange={(e) => {
+                                            const val = e.target.value;
+                                            setNewMsgPriority(val === '' ? '' : parseInt(val, 10));
+                                          }}
                                           className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-2 py-1 text-xs focus:outline-none"
                                         >
+                                          <option value="" className="bg-[var(--bg-color)]">Default (6)</option>
                                           {[0, 1, 2, 3, 4, 5, 6, 7].map(p => (
                                             <option key={p} value={p} className="bg-[var(--bg-color)]">{p}</option>
                                           ))}
@@ -1121,12 +1261,19 @@ export const DbcManager: React.FC = () => {
                                         <label className="text-[10px] text-[var(--text-muted)] font-bold">Source Address (SA)</label>
                                         <div className="flex gap-1.5 items-center">
                                           <input
-                                            type="number"
-                                            min={0}
-                                            max={253}
+                                            type="text"
+                                            placeholder="Optional (0)"
                                             value={newMsgSourceAddress}
-                                            onChange={(e) => setNewMsgSourceAddress(parseInt(e.target.value, 10) || 0)}
-                                            className="glass-input py-1 px-2 text-xs font-mono w-16"
+                                            onChange={(e) => {
+                                              const val = e.target.value.trim();
+                                              if (val === '') {
+                                                setNewMsgSourceAddress('');
+                                              } else {
+                                                const parsed = parseInt(val, 10);
+                                                setNewMsgSourceAddress(isNaN(parsed) ? '' : parsed);
+                                              }
+                                            }}
+                                            className="glass-input py-1 px-2 text-xs font-mono w-20"
                                           />
                                           {(() => {
                                             const activeProj = projects.find(p => p.id === activeProjectId);
@@ -1373,11 +1520,13 @@ export const DbcManager: React.FC = () => {
                                                 onBlur={() => handleLocalBlur(
                                                   `${currentMsg.id}-sa`,
                                                   (v) => {
-                                                    let val = parseInt(v.trim(), 10);
-                                                    if (v.trim().toLowerCase().startsWith('0x')) {
-                                                      val = parseInt(v.trim(), 16);
+                                                    const trimmed = v.trim();
+                                                    if (!trimmed) return 0;
+                                                    let val = parseInt(trimmed, 10);
+                                                    if (trimmed.toLowerCase().startsWith('0x')) {
+                                                      val = parseInt(trimmed, 16);
                                                     }
-                                                    return isNaN(val) ? jDetails.sa : Math.max(0, Math.min(253, val));
+                                                    return isNaN(val) ? 0 : Math.max(0, Math.min(253, val));
                                                   },
                                                   (newSa) => {
                                                     const newId = buildJ1939Id(jDetails.priority, jDetails.pgn, newSa, jDetails.da ?? 255);
@@ -1689,6 +1838,10 @@ export const DbcManager: React.FC = () => {
                                           </div>
                                         </div>
                                       </div>
+                                      <SignalValueDescriptions
+                                        valueDescriptions={sig.valueDescriptions}
+                                        onChange={(newValDescs) => handleUpdateSignal(currentMsg.id, sigIdx, { valueDescriptions: newValDescs })}
+                                      />
                                     </div>
                                   ))}
                                   {currentMsg.signals.length === 0 && (

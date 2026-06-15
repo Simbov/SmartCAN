@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Signal Value Descriptions Editor**: Value descriptions (`VAL_` mappings) can now be graphically managed and edited on signals within the DBC manager.
+- **Export Success Notifications**: Added a glassmorphic floating toast notification to give visual feedback when exporting DBC, CSV, specification, or project files.
+- **J1939 Columns in Monitor**: Differentiated numerical source addresses (`sa`) and device nicknames (`srcDevice`) inside the J1939 view mode of the Live Viewer.
+
+### Fixed
+- **Auto-Updater Registration**: Restored updater functionality by moving the Tauri plugins registration into the `.setup` closure.
+- **Simulator State Overwrite**: Prevented popped-out simulator windows from clobbering main dashboard `localStorage` states during initial load.
+- **Plotter Scaling & Scrolling**: Fixed plotter x-axis scaling to dynamically scroll rather than stretch when choosing limited time windows, and successfully persisted/recalled manual Y-scaling limits.
+- **Optional J1939 Fields**: Source Address (SA) and Priority inputs are now optional in J1939 message headers, defaulting to `0` and `6` respectively.
+
 ## [0.0.8] - 2026-06-13
 
 ### Added

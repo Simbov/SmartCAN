@@ -25,7 +25,8 @@ export const LiveViewer: React.FC = () => {
     liveViewerMode: viewMode,
     setLiveViewerMode: setViewMode,
     trackedBits,
-    toggleTrackBit
+    toggleTrackBit,
+    showToast
   } = useStore();
 
   const [filterText, setFilterText] = useState('');
@@ -366,7 +367,11 @@ export const LiveViewer: React.FC = () => {
     });
 
     const filename = `can_dump_${Date.now()}.csv`;
-    saveTextFile(filename, csv, [{ name: 'CSV Log File', extensions: ['csv'] }]);
+    saveTextFile(filename, csv, [{ name: 'CSV Log File', extensions: ['csv'] }]).then(success => {
+      if (success) {
+        showToast(`Successfully exported log: ${filename}`, 'success');
+      }
+    });
   };
 
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -760,7 +765,7 @@ export const LiveViewer: React.FC = () => {
                       {protocol === 'j1939' && (
                         <>
                           {visibleColumns.pgn && <td className="py-2 px-3 text-[var(--text-color)] font-mono">{j1939Details ? `0x${j1939Details.pgn.toString(16).toUpperCase()}` : '—'}</td>}
-                          {visibleColumns.sa && <td className="py-2 px-3 text-[var(--text-color)] truncate max-w-[110px]" title={j1939Details ? getNickname(j1939Details.sa) : '—'}>{j1939Details ? getNickname(j1939Details.sa) : '—'}</td>}
+                          {visibleColumns.sa && <td className="py-2 px-3 text-[var(--text-color)] font-mono truncate max-w-[110px]" title={j1939Details ? getNickname(j1939Details.sa) : '—'}>{j1939Details ? j1939Details.sa : '—'}</td>}
                           {visibleColumns.da && <td className="py-2 px-3 text-[var(--text-muted)] truncate max-w-[110px]" title={j1939Details ? (j1939Details.da !== null ? getNickname(j1939Details.da) : 'Global Broadcast') : '—'}>{j1939Details ? (j1939Details.da !== null ? getNickname(j1939Details.da) : 'Global (255)') : '—'}</td>}
                         </>
                       )}

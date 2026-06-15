@@ -132,6 +132,10 @@ interface CanStore {
   // Realtime Plotting
   plotSignals: string[];
   plotPoints: PlotPoint[];
+  plotXWindow: number | 'all';
+  plotYMode: 'dbc' | 'auto' | 'manual';
+  plotManualMinY: string;
+  plotManualMaxY: string;
   
   // Simulator internals
   isSimulating: boolean;
@@ -144,6 +148,9 @@ interface CanStore {
   timestampOffset: number | null;
   lastPhysicalTimestamp: number | null;
   trackedBits: Array<{ msgId: number; byteIdx: number; bitIdx: number }>;
+
+  // Toast
+  toast: { message: string; type: 'success' | 'error' | 'info' } | null;
 
   // Actions
   setProtocol: (proto: 'canopen' | 'j1939') => void;
@@ -200,6 +207,10 @@ interface CanStore {
   // Plot actions
   togglePlotSignal: (sigName: string) => void;
   clearPlotHistory: () => void;
+  setPlotXWindow: (xWindow: number | 'all') => void;
+  setPlotYMode: (yMode: 'dbc' | 'auto' | 'manual') => void;
+  setPlotManualMinY: (minY: string) => void;
+  setPlotManualMaxY: (maxY: string) => void;
 
   // Simulation controls
   startSimulation: () => void;
@@ -217,12 +228,15 @@ interface CanStore {
   setPanelVisibility: (panelName: string, visible: boolean) => void;
   toggleTrackBit: (msgId: number, byteIdx: number, bitIdx: number) => void;
   syncFromStorage: (parsed: any) => void;
+  showToast: (message: string, type?: 'success' | 'error' | 'info', duration?: number) => void;
+  clearToast: () => void;
 }
 
 const defaultDbcJ1939 = parseDbc(DEFAULT_J1939_DBC);
 
 // Keep a local reference for the tauri listener unlisten promise
 let kvaserUnlisten: (() => void) | null = null;
+let toastTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 function reconstructDevices(devices: any[]): CanDevice[] {
   if (!Array.isArray(devices)) return [];
@@ -381,10 +395,14 @@ const getInitialState = () => {
     fixedLogs: {} as Record<number, CanLog>,
     pausedLogs: false,
     totalFramesReceived: 0,
-    
     // Plot
     plotSignals: [] as string[],
     plotPoints: [] as PlotPoint[],
+    plotXWindow: 'all' as number | 'all',
+    plotYMode: 'auto' as 'dbc' | 'auto' | 'manual',
+    plotManualMinY: '0',
+    plotManualMaxY: '100',
+    toast: null as { message: string; type: 'success' | 'error' | 'info' } | null,
     
     // Simulation
     isSimulating: false,
@@ -465,6 +483,11 @@ const getInitialState = () => {
             lastPhysicalTimestamp: null,
             trackedBits: parsed.trackedBits || [],
             plotPoints: [],
+            plotXWindow: parsed.plotXWindow !== undefined ? parsed.plotXWindow : defaultState.plotXWindow,
+            plotYMode: parsed.plotYMode !== undefined ? parsed.plotYMode : defaultState.plotYMode,
+            plotManualMinY: parsed.plotManualMinY !== undefined ? parsed.plotManualMinY : defaultState.plotManualMinY,
+            plotManualMaxY: parsed.plotManualMaxY !== undefined ? parsed.plotManualMaxY : defaultState.plotManualMaxY,
+            toast: null,
             canopenNodes: activeProj.protocol === 'canopen' ? (() => {
               const nodes: Record<number, CanopenNode> = {};
               (activeProj.devices || []).forEach((d: any) => {
@@ -960,9 +983,17 @@ export const useStore = create<CanStore>((set, get) => {
         return {};
       }
 
+      let nodeName = trimmed.replace(/\.dbc$/i, '').replace(/[^a-zA-Z0-9_]/g, '_');
+      if (!/^[a-zA-Z_]/.test(nodeName)) {
+        nodeName = '_' + nodeName;
+      }
+      const initialContent = type === 'device'
+        ? `BU_: Master_Node ${nodeName}\n`
+        : `BU_: Master_Node\n`;
+
       const newEntry = {
         name: trimmed,
-        content: `BU_: Master Node\n`,
+        content: initialContent,
         type,
         enabled: true
       };
@@ -1049,7 +1080,11 @@ export const useStore = create<CanStore>((set, get) => {
 
       const json = JSON.stringify(payload, null, 2);
       const filename = `${state.projectSettings.name.replace(/\s+/g, '_')}.smartcan`;
-      saveTextFile(filename, json, [{ name: 'SmartCAN Project', extensions: ['smartcan'] }]);
+      saveTextFile(filename, json, [{ name: 'SmartCAN Project', extensions: ['smartcan'] }]).then(success => {
+        if (success) {
+          state.showToast(`Successfully saved project: ${filename}`, 'success');
+        }
+      });
     },
 
     loadSmartCanFile: (jsonContent) => {
@@ -1645,6 +1680,10 @@ export const useStore = create<CanStore>((set, get) => {
     }),
 
     clearPlotHistory: () => set({ plotPoints: [] }),
+    setPlotXWindow: (plotXWindow) => set({ plotXWindow }),
+    setPlotYMode: (plotYMode) => set({ plotYMode }),
+    setPlotManualMinY: (plotManualMinY) => set({ plotManualMinY }),
+    setPlotManualMaxY: (plotManualMaxY) => set({ plotManualMaxY }),
 
     // Transmit Frame Action
     transmitFrame: (id, data) => {
@@ -2094,9 +2133,32 @@ export const useStore = create<CanStore>((set, get) => {
           name: activeProj.name || 'Default Project',
           disabledMessageIds: activeProj.disabledMessageIds || {},
           messageNameOverrides: activeProj.messageNameOverrides || {}
-        } : state.projectSettings
+        } : state.projectSettings,
+        plotXWindow: parsed.plotXWindow !== undefined ? parsed.plotXWindow : state.plotXWindow,
+        plotYMode: parsed.plotYMode !== undefined ? parsed.plotYMode : state.plotYMode,
+        plotManualMinY: parsed.plotManualMinY !== undefined ? parsed.plotManualMinY : state.plotManualMinY,
+        plotManualMaxY: parsed.plotManualMaxY !== undefined ? parsed.plotManualMaxY : state.plotManualMaxY
       };
-    })
+    }),
+
+    showToast: (message, type = 'success', duration = 3000) => {
+      if (toastTimeoutId) {
+        clearTimeout(toastTimeoutId);
+      }
+      set({ toast: { message, type } });
+      toastTimeoutId = setTimeout(() => {
+        set({ toast: null });
+        toastTimeoutId = null;
+      }, duration);
+    },
+
+    clearToast: () => {
+      if (toastTimeoutId) {
+        clearTimeout(toastTimeoutId);
+        toastTimeoutId = null;
+      }
+      set({ toast: null });
+    }
   };
 });
 
@@ -2144,6 +2206,9 @@ if (typeof window !== 'undefined') {
 let lastSavedJson = '';
 // Subscribe to store changes to persist to localStorage
 useStore.subscribe((state) => {
+  if (typeof window !== 'undefined' && window.location.search.includes('window=simulator')) {
+    return;
+  }
   if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
     try {
       const persistedState = {
@@ -2176,7 +2241,11 @@ useStore.subscribe((state) => {
         panelHeights: state.panelHeights,
         panelOrder: state.panelOrder,
         liveViewerMode: state.liveViewerMode,
-        trackedBits: state.trackedBits
+        trackedBits: state.trackedBits,
+        plotXWindow: state.plotXWindow,
+        plotYMode: state.plotYMode,
+        plotManualMinY: state.plotManualMinY,
+        plotManualMaxY: state.plotManualMaxY
       };
       const json = JSON.stringify(persistedState);
       if (json === lastSavedJson) return;

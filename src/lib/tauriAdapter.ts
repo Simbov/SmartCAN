@@ -2,12 +2,7 @@
  * Checks if the application is running in a Tauri native shell.
  */
 export function isTauriEnv(): boolean {
-  return typeof window !== 'undefined' && (
-    '__TAURI__' in window ||
-    '__TAURI_INTERNALS__' in window ||
-    '__TAURI_METADATA__' in window ||
-    '__TAURI_IPC__' in window
-  );
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
 /**

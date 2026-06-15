@@ -501,7 +501,7 @@ BO_ 2364543232 BMS_Status_Custom: 8 BMS
     const newEntry = state.dbcRegistry.find(e => e.name === 'My Graphical DBC');
     expect(newEntry).toBeDefined();
     expect(newEntry?.type).toBe('custom');
-    expect(newEntry?.content).toContain('BU_: Master Node');
+    expect(newEntry?.content).toContain('BU_: Master_Node');
     expect(state.activeDbcName).toBe('My Graphical DBC');
     expect(state.dbcs['My Graphical DBC']).toBeDefined();
   });

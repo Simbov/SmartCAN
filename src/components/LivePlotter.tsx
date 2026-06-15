@@ -5,14 +5,24 @@ import { LineChart } from 'lucide-react';
 const COLORS = ['#10b981', '#06b6d4', '#f59e0b', '#a855f7', '#ec4899', '#3b82f6'];
 
 export const LivePlotter: React.FC = () => {
-  const { plotPoints, plotSignals, clearPlotHistory, protocol, dbcs } = useStore();
+  const {
+    plotPoints,
+    plotSignals,
+    clearPlotHistory,
+    protocol,
+    dbcs,
+    plotXWindow,
+    plotYMode,
+    plotManualMinY,
+    plotManualMaxY,
+    setPlotXWindow,
+    setPlotYMode,
+    setPlotManualMinY,
+    setPlotManualMaxY
+  } = useStore();
 
   const [isPaused, setIsPaused] = React.useState(false);
   const [pausedPoints, setPausedPoints] = React.useState<typeof plotPoints>([]);
-  const [xWindow, setXWindow] = React.useState<number | 'all'>('all');
-  const [yMode, setYMode] = React.useState<'dbc' | 'auto' | 'manual'>('auto');
-  const [manualMinY, setManualMinY] = React.useState('0');
-  const [manualMaxY, setManualMaxY] = React.useState('100');
 
   const displayedPoints = isPaused ? pausedPoints : plotPoints;
 
@@ -31,11 +41,11 @@ export const LivePlotter: React.FC = () => {
 
   // Filter points based on X time window preset
   const pointsFilteredByX = useMemo(() => {
-    if (xWindow === 'all' || displayedPoints.length === 0) return displayedPoints;
+    if (plotXWindow === 'all' || displayedPoints.length === 0) return displayedPoints;
     const latestT = displayedPoints[displayedPoints.length - 1].timestamp;
-    const threshold = latestT - xWindow * 1000;
+    const threshold = latestT - (plotXWindow as number) * 1000;
     return displayedPoints.filter(p => p.timestamp >= threshold);
-  }, [displayedPoints, xWindow]);
+  }, [displayedPoints, plotXWindow]);
 
   // Retrieve min/max limits for selected signals from active DBC databases
   const signalLimits = useMemo(() => {
@@ -72,16 +82,23 @@ export const LivePlotter: React.FC = () => {
     }
 
     // Min / Max X (Time)
-    const times = pointsFilteredByX.map(p => p.timestamp);
-    const minX = times[0];
-    const maxX = times[times.length - 1];
+    let minX: number;
+    let maxX: number;
+    if (plotXWindow === 'all') {
+      const times = pointsFilteredByX.map(p => p.timestamp);
+      minX = times[0];
+      maxX = times[times.length - 1];
+    } else {
+      maxX = displayedPoints[displayedPoints.length - 1]?.timestamp ?? 0;
+      minX = maxX - (plotXWindow as number) * 1000;
+    }
     const dx = maxX - minX || 1;
 
     // Determine Y bounds based on active scale mode
     let minY = Infinity;
     let maxY = -Infinity;
 
-    if (yMode === 'dbc') {
+    if (plotYMode === 'dbc') {
       plotSignals.forEach(sigName => {
         const lim = signalLimits[sigName];
         if (lim) {
@@ -89,9 +106,9 @@ export const LivePlotter: React.FC = () => {
           if (lim.max > maxY) maxY = lim.max;
         }
       });
-    } else if (yMode === 'manual') {
-      minY = parseFloat(manualMinY) || 0;
-      maxY = parseFloat(manualMaxY) || 100;
+    } else if (plotYMode === 'manual') {
+      minY = parseFloat(plotManualMinY) || 0;
+      maxY = parseFloat(plotManualMaxY) || 100;
     } else {
       pointsFilteredByX.forEach(pt => {
         plotSignals.forEach(sig => {
@@ -143,7 +160,7 @@ export const LivePlotter: React.FC = () => {
       maxY,
       paths
     };
-  }, [pointsFilteredByX, plotSignals, yMode, signalLimits, manualMinY, manualMaxY, chartWidth, chartHeight]);
+  }, [pointsFilteredByX, plotSignals, plotYMode, signalLimits, plotManualMinY, plotManualMaxY, chartWidth, chartHeight, plotXWindow, displayedPoints]);
 
   // Generate grid tick values
   const yTicks = useMemo(() => {
@@ -232,9 +249,9 @@ export const LivePlotter: React.FC = () => {
                 {([2, 5, 10, 30, 'all'] as const).map(w => (
                   <button
                     key={w}
-                    onClick={() => setXWindow(w)}
+                    onClick={() => setPlotXWindow(w)}
                     className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all ${
-                      xWindow === w
+                      plotXWindow === w
                         ? 'bg-[var(--bg-card)] text-[var(--text-color)] shadow border border-[var(--border-sub)]'
                         : 'text-[var(--text-muted)] hover:text-[var(--text-color)]'
                     }`}
@@ -249,8 +266,8 @@ export const LivePlotter: React.FC = () => {
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase">Y Scaling:</span>
               <select
-                value={yMode}
-                onChange={e => setYMode(e.target.value as any)}
+                value={plotYMode}
+                onChange={e => setPlotYMode(e.target.value as any)}
                 className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-2 py-0.5 text-[10px] focus:outline-none"
               >
                 <option value="auto">Auto-fit</option>
@@ -258,20 +275,20 @@ export const LivePlotter: React.FC = () => {
                 <option value="manual">Manual</option>
               </select>
 
-              {yMode === 'manual' && (
+              {plotYMode === 'manual' && (
                 <div className="flex items-center gap-1 ml-1 animate-fade-in">
                   <input
                     type="number"
-                    value={manualMinY}
-                    onChange={e => setManualMinY(e.target.value)}
+                    value={plotManualMinY}
+                    onChange={e => setPlotManualMinY(e.target.value)}
                     className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-1.5 w-12 py-0.5 text-[10px] font-mono text-center"
                     placeholder="Min"
                   />
                   <span className="text-[9px] text-[var(--text-muted)]">to</span>
                   <input
                     type="number"
-                    value={manualMaxY}
-                    onChange={e => setManualMaxY(e.target.value)}
+                    value={plotManualMaxY}
+                    onChange={e => setPlotManualMaxY(e.target.value)}
                     className="bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-color)] rounded px-1.5 w-12 py-0.5 text-[10px] font-mono text-center"
                     placeholder="Max"
                   />
