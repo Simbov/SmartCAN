@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.9] - 2026-06-15
+
 ### Added
 - **Signal Value Descriptions Editor**: Value descriptions (`VAL_` mappings) can now be graphically managed and edited on signals within the DBC manager.
 - **Export Success Notifications**: Added a glassmorphic floating toast notification to give visual feedback when exporting DBC, CSV, specification, or project files.
