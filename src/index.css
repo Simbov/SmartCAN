@@ -3,39 +3,39 @@
 @tailwind utilities;
 
 :root {
-  /* Light Theme - Aesthetic Beige Paper */
-  --bg-color: #f6f4ed;
-  --bg-card: rgba(255, 255, 255, 0.85);
-  --bg-card-sub: rgba(240, 237, 228, 0.85);
-  --bg-input: rgba(236, 234, 225, 0.75);
-  --border-color: rgba(46, 48, 55, 0.09);
-  --border-sub: rgba(46, 48, 55, 0.06);
-  --text-color: #2e3037;
-  --text-muted: #6b6f79;
-  --shadow-color: rgba(130, 126, 115, 0.08);
-  --bg-header: rgba(238, 236, 227, 0.85);
-  --bg-table-header: rgba(238, 236, 227, 0.9);
-  --radial-green: rgba(16, 185, 129, 0.05);
-  --radial-cyan: rgba(6, 182, 212, 0.05);
-  --grid-line: rgba(46, 48, 55, 0.02);
+  /* teenage engineering Light Theme — Canvas Mist dominant */
+  --bg-color: #f6f8f7;
+  --bg-card: #ffffff;
+  --bg-card-sub: #f6f8f7;
+  --bg-input: #ffffff;
+  --border-color: #e5e5e5;
+  --border-sub: #b2b2b2;
+  --text-color: #000000;
+  --text-muted: #b2b2b2;
+  --shadow-color: transparent;
+  --bg-header: #ffffff;
+  --bg-table-header: #f6f8f7;
+  
+  --color-canvas-mist: #f6f8f7;
+  --color-ink-black: #000000;
+  --color-carbon: #0f0e12;
+  --color-steel-gray: #e5e5e5;
+  --color-graphite: #b2b2b2;
 }
 
 .dark {
-  /* Dark Theme - Modern Cyber Space Blue */
-  --bg-color: #0f121d;
-  --bg-card: rgba(21, 27, 46, 0.75);
-  --bg-card-sub: rgba(14, 18, 32, 0.6);
-  --bg-input: rgba(11, 14, 25, 0.8);
-  --border-color: rgba(255, 255, 255, 0.12);
-  --border-sub: rgba(255, 255, 255, 0.08);
-  --text-color: #ffffff;
-  --text-muted: #94a3b8;
-  --shadow-color: rgba(0, 0, 0, 0.5);
-  --bg-header: rgba(16, 22, 40, 0.85);
-  --bg-table-header: rgba(30, 41, 59, 0.9);
-  --radial-green: rgba(16, 185, 129, 0.1);
-  --radial-cyan: rgba(6, 182, 212, 0.1);
-  --grid-line: rgba(255, 255, 255, 0.012);
+  /* teenage engineering Dark Theme — Carbon dominant */
+  --bg-color: #0f0e12;
+  --bg-card: #000000;
+  --bg-card-sub: #0f0e12;
+  --bg-input: #000000;
+  --border-color: #333333;
+  --border-sub: #555555;
+  --text-color: #f6f8f7;
+  --text-muted: #b2b2b2;
+  --shadow-color: transparent;
+  --bg-header: #0f0e12;
+  --bg-table-header: #000000;
 }
 
 @layer base {
@@ -50,62 +50,46 @@
   body {
     background-color: var(--bg-color);
     color: var(--text-color);
-    @apply antialiased font-sans select-none transition-colors duration-200;
-    background-image: 
-      radial-gradient(at 0% 0%, var(--radial-green) 0px, transparent 40%),
-      radial-gradient(at 100% 0%, var(--radial-cyan) 0px, transparent 40%),
-      linear-gradient(var(--grid-line) 1px, transparent 1px),
-      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-    background-size: 100% 100%, 100% 100%, 24px 24px, 24px 24px;
+    @apply antialiased font-sans select-none transition-colors duration-150;
+    font-weight: 300; /* Inter light default */
+    background-image: none;
   }
 }
 
-/* Glassmorphism style bindings mapping to theme variables */
+/* Crisp, flat components with 3px border radius and no drop shadows */
 .glass-panel {
   background-color: var(--bg-card);
   border: 1px solid var(--border-color);
   color: var(--text-color);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  @apply rounded-xl shadow-xl transition-all duration-200;
-  box-shadow: 0 8px 32px 0 var(--shadow-color);
+  border-radius: 3px;
+  @apply transition-all duration-200 ease-out-expo shadow-none;
 }
 
 .glass-input {
   background-color: var(--bg-input);
   border: 1px solid var(--border-color);
   color: var(--text-color);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  @apply rounded px-2.5 py-1.5 text-sm outline-none focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20 transition-all duration-150;
+  border-radius: 3px;
+  @apply px-2.5 py-1.5 text-xs outline-none focus:border-[var(--text-color)] focus:ring-0 transition-all duration-150 ease-out-expo;
 }
 
 .glass-button {
   background-color: var(--bg-input);
   border: 1px solid var(--border-color);
   color: var(--text-color);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  @apply hover:bg-[var(--bg-card-sub)] hover:border-emerald-500/30 rounded px-3.5 py-2 text-sm font-medium transition-all duration-150 outline-none flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-40 disabled:pointer-events-none;
+  border-radius: 3px;
+  @apply hover:bg-[var(--bg-card-sub)] hover:border-[var(--text-color)] px-3 py-1.5 text-xs font-light transition-all duration-150 ease-out-expo outline-none flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:pointer-events-none;
 }
 
-/* Glow effects */
-.glow-accent {
-  box-shadow: 0 0 15px rgba(16, 185, 129, 0.25);
-}
-
-.glow-canopen {
-  box-shadow: 0 0 15px rgba(245, 158, 11, 0.25);
-}
-
-.glow-j1939 {
-  box-shadow: 0 0 15px rgba(6, 182, 212, 0.25);
+/* Glow effects deactivated — flat indicator state */
+.glow-accent, .glow-canopen, .glow-j1939 {
+  box-shadow: none;
 }
 
 /* Chrome scrollbar custom overrides */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -114,12 +98,11 @@
 
 ::-webkit-scrollbar-thumb {
   background: var(--border-color);
-  border-radius: 4px;
+  border-radius: 0px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
-  @apply opacity-60;
 }
 
 /* Grid workspace layout */
@@ -144,15 +127,53 @@
 
 @keyframes slide-in {
   from {
-    transform: translateY(100%) scale(0.95);
+    transform: translateY(100%);
     opacity: 0;
   }
   to {
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
     opacity: 1;
   }
 }
 
 .animate-slide-in {
-  animation: slide-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: slide-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* GLOBAL DESIGN SYSTEM OVERRIDES — Mimicking T E / Emil Kowalski */
+button, input, select, textarea {
+  border-radius: 3px !important;
+  box-shadow: none !important;
+}
+
+/* Force crisp, machined 3px border-radius on cards, panels, and badges */
+.rounded, .rounded-sm, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-3xl {
+  border-radius: 3px !important;
+}
+
+/* Force flat design by disabling shadow and elevation effects */
+.shadow, .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl, .shadow-inner {
+  box-shadow: none !important;
+}
+
+/* Soften all heavy bold text to preserve the clean hairline typographic hierarchy */
+.font-bold {
+  font-weight: 400 !important;
+}
+.font-semibold {
+  font-weight: 300 !important;
+}
+.font-medium {
+  font-weight: 300 !important;
+}
+
+/* Subtle outline button hover styling */
+.glass-button:hover {
+  border-color: var(--text-color) !important;
+  background-color: var(--bg-card-sub) !important;
+}
+
+/* Clean active transitions for buttons */
+button:active {
+  opacity: 0.8;
 }

@@ -169,14 +169,14 @@ const PanelContainer: React.FC<PanelContainerProps> = ({ panelKey, children }) =
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       data-panel-key={panelKey}
-      className={`relative h-full w-full transition-all duration-200 rounded-xl ${
+      className={`relative h-full w-full transition-all duration-200 ease-out-expo rounded-[3px] ${
         isEditingLayout
-          ? `border-2 p-2 ${
+          ? `border p-2 ${
               isDraggingThis
-                ? 'opacity-40 border-dashed border-cyber-accent/40 bg-cyber-accent/5 z-0'
+                ? 'opacity-40 border-dashed border-cyber-accent bg-cyber-accent/5 z-0'
                 : isDragOverThis
-                  ? 'border-solid border-cyber-accent bg-cyber-accent/10 shadow-[0_0_15px_rgba(16,185,129,0.3)] z-50'
-                  : 'border-dashed border-cyber-accent/30 bg-black/10 shadow-[0_0_10px_rgba(16,185,129,0.03)] hover:border-cyber-accent/80 hover:shadow-[0_0_15px_rgba(16,185,129,0.15)] z-10'
+                  ? 'border-solid border-cyber-accent bg-cyber-accent/10 z-50'
+                  : 'border-dashed border-[var(--border-color)] bg-black/5 hover:border-cyber-accent/80 z-10'
             }`
           : 'z-10'
       }`}
@@ -185,7 +185,7 @@ const PanelContainer: React.FC<PanelContainerProps> = ({ panelKey, children }) =
       {isEditingLayout && (
         <div
           data-drag-handle={panelKey}
-          className={`flex items-center justify-between bg-[var(--bg-card-sub)] border border-[var(--border-color)] px-2.5 py-1.5 rounded-lg mb-2 text-[10px] font-bold select-none transition-colors ${
+          className={`flex items-center justify-between bg-[var(--bg-card-sub)] border border-[var(--border-color)] px-2.5 py-1.5 rounded-[3px] mb-2 text-[10px] font-bold select-none transition-colors ${
             isDraggingThis ? 'cursor-grabbing' : 'cursor-grab hover:bg-black/10'
           }`}
           draggable={true}
@@ -194,12 +194,12 @@ const PanelContainer: React.FC<PanelContainerProps> = ({ panelKey, children }) =
         >
           <div className="flex items-center gap-1.5 min-w-0 pointer-events-none">
             <GripHorizontal className="w-3.5 h-3.5 text-cyber-accent shrink-0" />
-            <span className="truncate text-[var(--text-color)]">{PANEL_NAMES[panelKey]}</span>
+            <span className="truncate text-[var(--text-color)] font-light">{PANEL_NAMES[panelKey]}</span>
           </div>
           <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
             <button
               onClick={() => togglePanelVisibility(panelKey)}
-              className="p-0.5 hover:bg-red-500/10 hover:text-red-400 rounded transition-colors"
+              className="p-0.5 hover:bg-red-500/10 hover:text-red-400 rounded-[2px] transition-colors"
               title="Close Panel"
             >
               <X className="w-3.5 h-3.5" />
@@ -324,18 +324,18 @@ const App: React.FC = () => {
 
   if (isSimulatorWindow) {
     return (
-      <div className="w-full h-full flex flex-col bg-[var(--bg-color)] text-[var(--text-color)] transition-colors duration-200 overflow-hidden">
+      <div className="w-full h-full flex flex-col bg-[var(--bg-color)] text-[var(--text-color)] transition-colors duration-150 overflow-hidden font-sans">
         {/* Title Bar */}
-        <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border-color)] bg-black/10 backdrop-blur-md shrink-0">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border-color)] bg-[var(--bg-card-sub)] shrink-0">
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-cyber-accent animate-pulse" />
-            <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-color)]">SmartCAN Independent Simulator</span>
+            <span className="w-2 h-2 rounded-none bg-cyber-accent" />
+            <span className="text-[10px] font-light uppercase tracking-wider text-[var(--text-color)]">SmartCAN Independent Simulator</span>
           </div>
-          <span className="text-[10px] text-[var(--text-muted)] font-mono">localStorage Synced</span>
+          <span className="text-[10px] text-[var(--text-muted)] font-mono font-light">localStorage Synced</span>
         </div>
 
         {/* Side-by-Side Split View */}
-        <div className="flex-1 flex overflow-hidden min-h-0 p-4 gap-4 divide-x divide-[var(--border-color)]">
+        <div className="flex-1 flex overflow-hidden min-h-0 p-4 gap-4 divide-x divide-[var(--border-color)] bg-[var(--bg-color)]">
           <div className="flex-1 overflow-y-auto pr-2 h-full">
             <DeviceManager />
           </div>
@@ -351,7 +351,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="w-full h-full flex flex-col bg-[var(--bg-color)] text-[var(--text-color)] transition-colors duration-200">
+    <div className="w-full h-full flex flex-col bg-[var(--bg-color)] text-[var(--text-color)] transition-colors duration-150 font-sans">
       {/* 1. Header connection bar */}
       <Header />
 
@@ -359,12 +359,12 @@ const App: React.FC = () => {
       <ConnectionErrorModal />
 
       {/* Workspace Tab Bar */}
-      <div className="flex px-6 pt-2 gap-2 border-b border-[var(--border-color)] bg-black/5 backdrop-blur-md">
+      <div className="flex px-6 pt-2 gap-2 border-b border-[var(--border-color)] bg-[var(--bg-card-sub)]">
         <button
           onClick={() => setActiveWorkspaceTab('monitor')}
-          className={`flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-t-lg border-t border-x transition-all duration-150 ${
+          className={`flex items-center gap-2 px-5 py-2 text-xs font-light rounded-t-[3px] border-t border-x transition-all duration-150 ${
             activeWorkspaceTab === 'monitor'
-              ? 'bg-[var(--bg-card)] text-[var(--text-color)] border-[var(--border-color)] shadow-sm'
+              ? 'bg-[var(--bg-card)] text-[var(--text-color)] border-[var(--border-color)]'
               : 'bg-transparent text-[var(--text-muted)] border-transparent hover:text-[var(--text-color)]'
           }`}
         >
@@ -373,9 +373,9 @@ const App: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveWorkspaceTab('dbc')}
-          className={`flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-t-lg border-t border-x transition-all duration-150 ${
+          className={`flex items-center gap-2 px-5 py-2 text-xs font-light rounded-t-[3px] border-t border-x transition-all duration-150 ${
             activeWorkspaceTab === 'dbc'
-              ? 'bg-[var(--bg-card)] text-[var(--text-color)] border-[var(--border-color)] shadow-sm'
+              ? 'bg-[var(--bg-card)] text-[var(--text-color)] border-[var(--border-color)]'
               : 'bg-transparent text-[var(--text-muted)] border-transparent hover:text-[var(--text-color)]'
           }`}
         >
@@ -385,7 +385,7 @@ const App: React.FC = () => {
       </div>
 
       {/* 2. Workspace container */}
-      <main className="flex-1 overflow-hidden min-h-0 flex flex-col relative">
+      <main className="flex-1 overflow-hidden min-h-0 flex flex-col relative bg-[var(--bg-color)]">
         {activeWorkspaceTab === 'dbc' ? (
           <div className="flex-1 p-4 overflow-hidden min-h-0">
             <DbcManager />
@@ -399,10 +399,10 @@ const App: React.FC = () => {
                   onDragOver={(e) => handleZoneDragOver(e, 'sidebar')}
                   onDragLeave={handleZoneDragLeave}
                   onDrop={(e) => handleZoneDrop(e, 'sidebar')}
-                  className={`flex flex-col gap-4 overflow-y-auto overflow-x-hidden p-2 rounded-xl transition-all duration-200 border-2 ${
+                  className={`flex flex-col gap-4 overflow-y-auto overflow-x-hidden p-2 rounded-[3px] transition-all duration-150 border ${
                     isEditingLayout
                       ? dragOverZone === 'sidebar'
-                        ? 'border-cyber-accent border-solid bg-cyber-accent/10 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
+                        ? 'border-cyber-accent border-solid bg-cyber-accent/10'
                         : 'border-dashed border-[var(--border-color)] bg-black/5'
                       : 'border-transparent'
                   }`}
@@ -430,7 +430,7 @@ const App: React.FC = () => {
                     );
                   })}
                   {isEditingLayout && sidebarKeys.length === 0 && (
-                    <div className="flex-1 flex items-center justify-center text-center p-4 border border-dashed border-[var(--border-color)] rounded-lg text-[10px] text-[var(--text-muted)] italic">
+                    <div className="flex-1 flex items-center justify-center text-center p-4 border border-dashed border-[var(--border-color)] rounded-[3px] text-[10px] text-[var(--text-muted)] italic font-light">
                       Drag panels here to place in Sidebar
                     </div>
                   )}
@@ -448,10 +448,10 @@ const App: React.FC = () => {
                       onDrop={(e) => handleZoneDrop(e, 'main-top')}
                       className={!isEditingLayout && mainTopKeys.length === 1
                         ? "h-full w-full flex flex-col border-transparent"
-                        : `grid grid-cols-12 gap-4 p-2 rounded-xl transition-all duration-200 border-2 ${
+                        : `grid grid-cols-12 gap-4 p-2 rounded-[3px] transition-all duration-150 border ${
                             isEditingLayout
                               ? dragOverZone === 'main-top'
-                                ? 'border-cyber-accent border-solid bg-cyber-accent/10 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
+                                ? 'border-cyber-accent border-solid bg-cyber-accent/10'
                                 : 'border-dashed border-[var(--border-color)] bg-black/5'
                               : 'border-transparent h-full'
                           }`
@@ -497,7 +497,7 @@ const App: React.FC = () => {
                         );
                       })}
                       {isEditingLayout && mainTopKeys.length === 0 && (
-                        <div className="col-span-12 flex items-center justify-center text-center p-6 border border-dashed border-[var(--border-color)] rounded-lg text-[10px] text-[var(--text-muted)] italic">
+                        <div className="col-span-12 flex items-center justify-center text-center p-6 border border-dashed border-[var(--border-color)] rounded-[3px] text-[10px] text-[var(--text-muted)] italic font-light">
                           Drag panels here to place in Dashboard Top
                         </div>
                       )}
@@ -510,10 +510,10 @@ const App: React.FC = () => {
                       onDragOver={(e) => handleZoneDragOver(e, 'main-bottom')}
                       onDragLeave={handleZoneDragLeave}
                       onDrop={(e) => handleZoneDrop(e, 'main-bottom')}
-                      className={`grid grid-cols-12 gap-4 p-2 rounded-xl transition-all duration-200 border-2 ${
+                      className={`grid grid-cols-12 gap-4 p-2 rounded-[3px] transition-all duration-150 border ${
                         isEditingLayout
                           ? dragOverZone === 'main-bottom'
-                            ? 'border-cyber-accent border-solid bg-cyber-accent/10 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
+                            ? 'border-cyber-accent border-solid bg-cyber-accent/10'
                             : 'border-dashed border-[var(--border-color)] bg-black/5'
                           : 'border-transparent h-full'
                       }`}
@@ -553,7 +553,7 @@ const App: React.FC = () => {
                         );
                       })}
                       {isEditingLayout && mainBottomKeys.length === 0 && (
-                        <div className="col-span-12 flex items-center justify-center text-center p-6 border border-dashed border-[var(--border-color)] rounded-lg text-[10px] text-[var(--text-muted)] italic">
+                        <div className="col-span-12 flex items-center justify-center text-center p-6 border border-dashed border-[var(--border-color)] rounded-[3px] text-[10px] text-[var(--text-muted)] italic font-light">
                           Drag panels here to place in Dashboard Bottom
                         </div>
                       )}
@@ -562,7 +562,7 @@ const App: React.FC = () => {
                 </section>
               ) : (
                 <div className="flex flex-col items-center justify-center text-center p-8 glass-panel h-full w-full">
-                  <span className="text-sm text-[var(--text-muted)] font-medium">
+                  <span className="text-xs text-[var(--text-muted)] font-light">
                     No panels are currently visible. Click "Edit Layout" in the header to customize panels.
                   </span>
                 </div>
@@ -574,24 +574,24 @@ const App: React.FC = () => {
               <div className="mx-4 mb-4 p-3 glass-panel bg-[var(--bg-card)] border-dashed border-cyber-accent/30 flex items-center justify-between gap-4 animate-fade-in z-30 shrink-0">
                 <div className="flex items-center gap-2">
                   <LayoutGrid className="w-4 h-4 text-cyber-accent" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-color)]">
+                  <span className="text-[10px] font-light uppercase tracking-wider text-[var(--text-color)]">
                     Add / Remove Panels
                   </span>
                 </div>
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap font-sans font-light">
                   {Object.entries(PANEL_NAMES).map(([key, label]) => {
                     const isVisible = visiblePanels[key];
                     return (
                       <button
                         key={key}
                         onClick={() => togglePanelVisibility(key)}
-                        className={`px-3 py-1.5 rounded text-[11px] font-semibold border flex items-center gap-1.5 transition-all duration-150 active:scale-95 ${
+                        className={`px-3 py-1.5 rounded-[3px] text-[10px] font-light border flex items-center gap-1.5 transition-all duration-150 ${
                           isVisible
-                            ? 'bg-cyber-accent/15 border-cyber-accent/30 text-cyber-accent'
+                            ? 'bg-cyber-accent/10 border-cyber-accent text-cyber-accent'
                             : 'bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-color)] hover:border-[var(--text-muted)]'
                         }`}
                       >
-                        <span className="text-xs font-bold">{isVisible ? '✓' : '+'}</span>
+                        <span className="text-xs font-light">{isVisible ? '✓' : '+'}</span>
                         <span>{label}</span>
                       </button>
                     );
@@ -603,18 +603,18 @@ const App: React.FC = () => {
         )}
       </main>
       {toast && (
-        <div className="fixed bottom-5 right-5 z-[9999] animate-slide-in flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg border border-[var(--border-color)] bg-[var(--bg-card)]/80 backdrop-blur-md max-w-sm">
+        <div className="fixed bottom-5 right-5 z-[9999] animate-slide-in flex items-center gap-3 px-4 py-3 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card)] max-w-sm shadow-none">
           {toast.type === 'success' && <CheckCircle className="w-5 h-5 text-emerald-500 flex-shrink-0" />}
           {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-500 flex-shrink-0" />}
           {toast.type === 'info' && <Info className="w-5 h-5 text-sky-500 flex-shrink-0" />}
           
-          <div className="flex-1 text-xs font-semibold text-[var(--text-color)] leading-snug">
+          <div className="flex-1 text-xs font-light text-[var(--text-color)] leading-snug">
             {toast.message}
           </div>
           
           <button
             onClick={clearToast}
-            className="text-[var(--text-muted)] hover:text-[var(--text-color)] transition-colors p-0.5 rounded animate-pulse"
+            className="text-[var(--text-muted)] hover:text-[var(--text-color)] transition-colors p-0.5 rounded-[2px]"
           >
             <X className="w-3.5 h-3.5" />
           </button>

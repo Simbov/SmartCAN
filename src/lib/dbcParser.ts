@@ -35,7 +35,30 @@ export function parseDbc(content: string): DbcDatabase {
     messages: {}
   };
 
-  const lines = content.split(/\r?\n/);
+  const rawLines = content.split(/\r?\n/);
+  const lines: string[] = [];
+  let accumulator = '';
+
+  for (const rawLine of rawLines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
+
+    if (accumulator) {
+      accumulator += ' ' + trimmed;
+      if (trimmed.endsWith(';')) {
+        lines.push(accumulator);
+        accumulator = '';
+      }
+    } else if (trimmed.startsWith('VAL_') && !trimmed.endsWith(';')) {
+      accumulator = trimmed;
+    } else {
+      lines.push(trimmed);
+    }
+  }
+  if (accumulator) {
+    lines.push(accumulator);
+  }
+
   let currentMessage: DbcMessage | null = null;
 
   // Regex definitions
@@ -60,7 +83,8 @@ export function parseDbc(content: string): DbcDatabase {
     if (line.startsWith('BO_')) {
       const match = line.match(messageRegex);
       if (!match) {
-        throw new SyntaxError(`Malformed DBC message definition line: "${line}"`);
+        console.warn(`Malformed DBC message definition line: "${line}"`);
+        continue;
       }
       const id = parseInt(match[1], 10);
       const name = match[2];
@@ -82,7 +106,8 @@ export function parseDbc(content: string): DbcDatabase {
     if (line.startsWith('SG_') && currentMessage) {
       const match = line.match(signalRegex);
       if (!match) {
-        throw new SyntaxError(`Malformed DBC signal definition line: "${line}"`);
+        console.warn(`Malformed DBC signal definition line: "${line}"`);
+        continue;
       }
       const name = match[1];
       const startBit = parseInt(match[2], 10);
@@ -124,8 +149,8 @@ export function parseDbc(content: string): DbcDatabase {
         const signalName = match[2];
         const valuesRaw = match[3].trim();
         
-        // Parse "0 "Val0" 1 "Val1"" pattern
-        const valPairsRegex = /(\d+)\s+"([^"]+)"/g;
+        // Parse "-0 "Val0" 1 "Val1"" pattern (supporting negative integers and empty descriptions)
+        const valPairsRegex = /(-?\d+)\s+"([^"]*)"/g;
         const valMap: Record<number, string> = {};
         let pairMatch;
         while ((pairMatch = valPairsRegex.exec(valuesRaw)) !== null) {

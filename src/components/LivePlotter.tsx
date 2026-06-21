@@ -197,7 +197,7 @@ export const LivePlotter: React.FC = () => {
 
       {plotSignals.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center p-4 border border-dashed border-[var(--border-color)] rounded-lg bg-[var(--bg-card-sub)]">
-          <LineChart className="w-8 h-8 text-[var(--text-muted)] mb-2 animate-bounce" />
+          <LineChart className="w-8 h-8 text-[var(--text-muted)] mb-2 animate-pulse" />
           <span className="text-xs text-[var(--text-muted)] max-w-[200px]">
             No signals selected for plotting. Go to the expanded rows in the Live Traffic Viewer and click the **Plot** button next to any decoded signal.
           </span>

@@ -349,10 +349,7 @@ const getInitialState = () => {
     activeDbcName: 'Default J1939 Database',
     
     // Devices and Registry
-    devices: [
-      { id: 'dev-1', name: 'Engine ECU', nodeId: 1, enabled: true, isSimulated: true, customMessages: [] },
-      { id: 'dev-2', name: 'Transmission ECU', nodeId: 3, enabled: true, isSimulated: true, customMessages: [] }
-    ] as CanDevice[],
+    devices: [] as CanDevice[],
     projectSettings: {
       name: 'Default Project',
       disabledMessageIds: {} as Record<number, boolean>,
@@ -366,10 +363,7 @@ const getInitialState = () => {
         baudRate: 250000,
         enabled: true,
         enabledDbcNames: ['Default J1939 Database'],
-        devices: [
-          { id: 'dev-1', name: 'Engine ECU', nodeId: 1, enabled: true, isSimulated: true, customMessages: [] },
-          { id: 'dev-2', name: 'Transmission ECU', nodeId: 3, enabled: true, isSimulated: true, customMessages: [] }
-        ],
+        devices: [],
         disabledMessageIds: {},
         messageNameOverrides: {}
       }
@@ -553,15 +547,7 @@ export const useStore = create<CanStore>((set, get) => {
       const activeDbc = proto === 'j1939' ? 'Default J1939 Database' : 'Default CANopen Database';
       
       // Default devices for the protocol
-      const defaultDevices: CanDevice[] = proto === 'j1939' 
-        ? [
-            { id: 'dev-1', name: 'Engine ECU', nodeId: 1, enabled: true, isSimulated: true, customMessages: [] },
-            { id: 'dev-2', name: 'Transmission ECU', nodeId: 3, enabled: true, isSimulated: true, customMessages: [] }
-          ]
-        : [
-            { id: 'dev-1', name: 'PDO Node 1', nodeId: 1, enabled: true, isSimulated: true, customMessages: [] },
-            { id: 'dev-2', name: 'PDO Node 2', nodeId: 2, enabled: true, isSimulated: true, customMessages: [] }
-          ];
+      const defaultDevices: CanDevice[] = [];
 
       // Reset logs and plotting history
       Object.keys(lastTimestampsById).forEach(key => delete lastTimestampsById[Number(key)]);
@@ -1344,6 +1330,12 @@ export const useStore = create<CanStore>((set, get) => {
       for (const parsedDbc of Object.values(state.dbcs)) {
         if (state.protocol === 'j1939') {
           const frameDetails = parseJ1939Id(frame.id);
+          
+          // Only want DBC's to apply after node at that SA is defined in logical devices.
+          if (!state.devices.some(dev => dev.nodeId === frameDetails.sa)) {
+            continue;
+          }
+
           // Find matching BO_ message by matching PGN
           const matchedMessage = Object.values(parsedDbc.messages).find(msg => {
             const dbMsgDetails = parseJ1939Id(msg.id);
@@ -1361,6 +1353,13 @@ export const useStore = create<CanStore>((set, get) => {
           }
         } else {
           // CANopen ID direct matching
+          const frameNodeId = frame.id & 0x7F;
+          
+          // Only want DBC's to apply after node at that SA is defined in logical devices.
+          if (!state.devices.some(dev => dev.nodeId === frameNodeId)) {
+            continue;
+          }
+
           const matchedMessage = parsedDbc.messages[frame.id];
           if (matchedMessage) {
             if (!msgName) {
@@ -1542,24 +1541,47 @@ export const useStore = create<CanStore>((set, get) => {
       const lines = csvContent.split(/\r?\n/);
       if (lines.length < 2) return;
 
-      // Detect delimiter based on the first line (header)
-      const delimiter = lines[0].includes(';') ? ';' : ',';
+      // Auto-detect delimiter based on the first line (header)
+      let delimiter = ',';
+      if (lines[0].includes(';')) delimiter = ';';
+      else if (lines[0].includes('\t')) delimiter = '\t';
+      else if (lines[0].includes('|')) delimiter = '|';
+      
       const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase());
 
       // Locate column indices dynamically
       const timeIdx = headers.findIndex(h => h.includes('time'));
-      const dirIdx = headers.findIndex(h => h.includes('dir') || h.includes('flag'));
+      const dirIdx = headers.findIndex(h => h.includes('dir') || h.includes('flag') || h.includes('flags'));
       const idIdx = headers.findIndex(h => h.includes('id') || h.includes('ident'));
       const dlcIdx = headers.findIndex(h => h.includes('dlc'));
 
-      // Look for data columns: can be Data(0)... or a single Data column
-      const data0Idx = headers.findIndex(h => h.startsWith('data(0)') || h === 'data(0)' || h === 'data0' || h.startsWith('data0'));
+      // Look for data columns: can be Data 0... Data 7, Data(0)... or a single Data column
+      const data0Idx = headers.findIndex(h => 
+        h.startsWith('data(0)') || 
+        h === 'data(0)' || 
+        h === 'data0' || 
+        h.startsWith('data0') || 
+        h.startsWith('data 0') || 
+        h === 'data 0'
+      );
       const dataHexIdx = headers.findIndex(h => h.includes('data(hex)') || h === 'data');
 
+      // Setup default fallback indices based on the new release specification:
+      // Time, Channel, id, Flags, DLC, Data 0-7, Counter
       const actualTimeIdx = timeIdx !== -1 ? timeIdx : 0;
-      const actualDirIdx = dirIdx !== -1 ? dirIdx : 1;
+      const actualDirIdx = dirIdx !== -1 ? dirIdx : 3;
       const actualIdIdx = idIdx !== -1 ? idIdx : 2;
-      const actualDlcIdx = dlcIdx !== -1 ? dlcIdx : 3;
+      const actualDlcIdx = dlcIdx !== -1 ? dlcIdx : 4;
+      
+      let dataStartIdx = data0Idx;
+      if (dataStartIdx === -1) {
+        if (dataHexIdx !== -1) {
+          // Will use dataHexIdx
+        } else {
+          // Default to index 5 (which is the 6th column, F, in Time, Channel, id, Flags, DLC, Data 0...)
+          dataStartIdx = 5;
+        }
+      }
 
       let isSeconds = false;
       const timeHeader = timeIdx !== -1 ? headers[timeIdx] : '';
@@ -1572,20 +1594,44 @@ export const useStore = create<CanStore>((set, get) => {
         if (!line) continue;
 
         const cols = line.split(delimiter);
-        if (cols.length <= Math.max(actualTimeIdx, actualDirIdx, actualIdIdx, actualDlcIdx)) continue;
+        if (cols.length <= Math.max(actualTimeIdx, actualIdIdx)) continue;
 
-        let timestamp = parseFloat(cols[actualTimeIdx]) || 0;
-        if (isSeconds) {
-          timestamp = Math.round(timestamp * 1000);
+        // Parse Time: can be absolute float (seconds/ms) or HH:MM:SS.mmm
+        let timestamp = 0;
+        const timeStr = cols[actualTimeIdx];
+        if (timeStr) {
+          const clean = timeStr.trim();
+          if (clean.includes(':')) {
+            const parts = clean.split(':');
+            let hrs = 0;
+            let mins = 0;
+            let secs = 0;
+            if (parts.length === 3) {
+              hrs = parseFloat(parts[0]) || 0;
+              mins = parseFloat(parts[1]) || 0;
+              secs = parseFloat(parts[2]) || 0;
+            } else if (parts.length === 2) {
+              mins = parseFloat(parts[0]) || 0;
+              secs = parseFloat(parts[1]) || 0;
+            }
+            timestamp = Math.round((hrs * 3600 + mins * 60 + secs) * 1000);
+          } else {
+            const parsedFloat = parseFloat(clean) || 0;
+            timestamp = isSeconds ? Math.round(parsedFloat * 1000) : parsedFloat;
+          }
         }
 
-        const rawDir = cols[actualDirIdx].trim().toUpperCase();
+        // Parse direction from Flags / Dir column
         let direction: 'RX' | 'TX' = 'RX';
-        if (rawDir.includes('TX') || rawDir === 'T' || rawDir === '1' || rawDir === '0X01') {
-          direction = 'TX';
+        if (cols[actualDirIdx]) {
+          const rawDir = cols[actualDirIdx].trim().toUpperCase();
+          if (rawDir.includes('TX') || rawDir.startsWith('T') || rawDir === '1' || rawDir === '0X01') {
+            direction = 'TX';
+          }
         }
 
-        const rawId = cols[actualIdIdx].trim();
+        // Parse CAN ID
+        const rawId = cols[actualIdIdx] ? cols[actualIdIdx].trim() : '';
         const id = rawId.toLowerCase().startsWith('0x')
           ? (parseInt(rawId.slice(2), 16) || 0)
           : (headers[actualIdIdx] && (headers[actualIdIdx].includes('ident') || headers[actualIdIdx] === 'id(hex)'))
@@ -1594,28 +1640,28 @@ export const useStore = create<CanStore>((set, get) => {
           ? (parseInt(rawId, 16) || 0)
           : (parseInt(rawId, 10) || parseInt(rawId, 16) || 0);
 
-        const dlc = parseInt(cols[actualDlcIdx].trim(), 10) || 0;
+        // DLC
+        const dlc = cols[actualDlcIdx] ? (parseInt(cols[actualDlcIdx].trim(), 10) || 0) : 0;
 
-        let dataBytes: Uint8Array;
-        if (data0Idx !== -1) {
-          const bytes: number[] = [];
-          for (let j = 0; j < dlc; j++) {
-            const colVal = cols[data0Idx + j];
+        // Parse data bytes (read up to 8 bytes)
+        const bytes: number[] = [];
+        if (dataStartIdx !== -1 && dataHexIdx === -1) {
+          for (let j = 0; j < 8; j++) {
+            const colVal = cols[dataStartIdx + j];
             if (colVal !== undefined && colVal.trim() !== '') {
               const trimmed = colVal.trim().replace(/^0x/i, '');
               const val = parseInt(trimmed, 16);
               bytes.push(isNaN(val) ? 0 : val);
             }
           }
-          dataBytes = new Uint8Array(bytes);
-        } else if (dataHexIdx !== -1) {
+        } else if (dataHexIdx !== -1 && cols[dataHexIdx]) {
           const dataHex = cols[dataHexIdx].trim().replace(/\s+/g, '');
-          dataBytes = new Uint8Array(
-            dataHex.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []
-          );
+          const matchHex = dataHex.match(/.{1,2}/g);
+          if (matchHex) {
+            matchHex.forEach(byte => bytes.push(parseInt(byte, 16)));
+          }
         } else {
-          // Fallback: collect all trailing columns after DLC
-          const bytes: number[] = [];
+          // Fallback: collect trailing columns after actualDlcIdx
           for (let j = actualDlcIdx + 1; j < cols.length; j++) {
             const colVal = cols[j];
             if (colVal !== undefined && colVal.trim() !== '') {
@@ -1624,14 +1670,16 @@ export const useStore = create<CanStore>((set, get) => {
               bytes.push(isNaN(val) ? 0 : val);
             }
           }
-          dataBytes = new Uint8Array(bytes).slice(0, dlc);
         }
+        
+        const dataBytes = new Uint8Array(bytes);
+        const actualDlc = Math.max(dlc, dataBytes.length);
 
         state.addLog({
           timestamp,
           direction,
           id,
-          dlc,
+          dlc: actualDlc,
           data: dataBytes
         });
       }

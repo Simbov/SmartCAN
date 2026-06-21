@@ -158,18 +158,43 @@ export const LiveViewer: React.FC = () => {
   // Helper to render inline decoded signals summary
   const formatDecodedSignals = (decoded: Record<string, number> | null, activeDbcName: string): string => {
     if (!decoded || Object.keys(decoded).length === 0) return '—';
-    const activeDbc = dbcs[activeDbcName];
     return Object.entries(decoded)
       .map(([sigName, val]) => {
         let unit = '';
+        let valDesc = '';
+        let found = false;
+        
+        const activeDbc = dbcs[activeDbcName];
         if (activeDbc) {
           Object.values(activeDbc.messages).forEach(m => {
             const matchedSig = m.signals.find(s => s.name === sigName);
-            if (matchedSig) unit = matchedSig.unit;
+            if (matchedSig) {
+              unit = matchedSig.unit;
+              if (matchedSig.valueDescriptions && matchedSig.valueDescriptions[val] !== undefined) {
+                valDesc = matchedSig.valueDescriptions[val];
+              }
+              found = true;
+            }
           });
         }
+        
+        if (!found) {
+          for (const db of Object.values(dbcs)) {
+            Object.values(db.messages).forEach(m => {
+              const matchedSig = m.signals.find(s => s.name === sigName);
+              if (matchedSig) {
+                unit = matchedSig.unit;
+                if (matchedSig.valueDescriptions && matchedSig.valueDescriptions[val] !== undefined) {
+                  valDesc = matchedSig.valueDescriptions[val];
+                }
+              }
+            });
+          }
+        }
+
         const formattedVal = typeof val === 'number' ? val.toFixed(2).replace(/\.?0+$/, '') : val;
-        return `${sigName}: ${formattedVal}${unit ? ' ' + unit : ''}`;
+        const displayVal = valDesc ? `${valDesc} (${formattedVal})` : formattedVal;
+        return `${sigName}: ${displayVal}${unit ? ' ' + unit : ''}`;
       })
       .join(', ');
   };
@@ -454,7 +479,7 @@ export const LiveViewer: React.FC = () => {
         </div>
       </div>
 
-      <div className="mb-3 flex flex-wrap items-center gap-3 justify-between">
+      <div className="mb-3 flex flex-wrap items-center gap-3 justify-between font-sans">
         <div className="flex items-center gap-2 flex-1 min-w-[280px]">
           <div className="relative flex-1">
             <input
@@ -462,16 +487,16 @@ export const LiveViewer: React.FC = () => {
               placeholder="Filter logs by Hex ID, message name, payload bytes..."
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
-              className="glass-input w-full py-1.5 text-xs rounded"
+              className="glass-input w-full py-1.5 text-xs rounded-[3px] font-light"
               style={{ paddingLeft: '2.25rem' }}
             />
             <Filter className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2" />
           </div>
           <button
             onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-            className={`glass-button text-xs py-1.5 px-3 flex items-center gap-1.5 shrink-0 ${
+            className={`glass-button text-xs py-1.5 px-3 flex items-center gap-1.5 rounded-[3px] shrink-0 ${
               showAdvancedFilters || getActiveFiltersCount() > 0 
-                ? 'border-cyber-accent/40 bg-cyber-accent/5 text-cyber-accent font-bold animate-pulse-glow' 
+                ? 'bg-cyber-accent/15 border-cyber-accent text-cyber-accent font-normal' 
                 : ''
             }`}
             title="Toggle Advanced Filter & Analyzer Panel"
@@ -479,24 +504,24 @@ export const LiveViewer: React.FC = () => {
             <SlidersHorizontal className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Advanced Filters</span>
             {getActiveFiltersCount() > 0 && (
-              <span className="bg-cyber-accent text-black font-bold text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
+              <span className="bg-cyber-accent text-black font-normal text-[9px] w-4 h-4 rounded-[2px] flex items-center justify-center">
                 {getActiveFiltersCount()}
               </span>
             )}
           </button>
         </div>
 
-        <div className="flex items-center gap-3 bg-[var(--bg-card-sub)] border border-[var(--border-color)] p-1.5 rounded flex-shrink-0">
-          <div className="flex bg-[var(--bg-input)] rounded p-0.5 border border-[var(--border-sub)]">
+        <div className="flex items-center gap-3 bg-[var(--bg-card-sub)] border border-[var(--border-color)] p-1 rounded-[3px] flex-shrink-0">
+          <div className="flex bg-[var(--bg-input)] rounded-[3px] p-0.5 border border-[var(--border-color)]">
             <button
               onClick={() => setViewMode('scroll')}
-              className={`px-2.5 py-1 text-[10px] font-bold rounded transition-all duration-150 ${viewMode === 'scroll' ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/25 shadow-sm font-semibold' : 'text-[var(--text-muted)] hover:text-[var(--text-color)]'}`}
+              className={`px-2.5 py-1 text-[10px] font-light rounded-[2px] transition-all duration-150 ease-out-expo ${viewMode === 'scroll' ? 'bg-[var(--text-color)] text-[var(--bg-color)] border border-[var(--text-color)]' : 'text-[var(--text-muted)] hover:text-[var(--text-color)] border border-transparent'}`}
             >
               Scroll Feed
             </button>
             <button
               onClick={() => setViewMode('fixed')}
-              className={`px-2.5 py-1 text-[10px] font-bold rounded transition-all duration-150 ${viewMode === 'fixed' ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/25 shadow-sm font-semibold' : 'text-[var(--text-muted)] hover:text-[var(--text-color)]'}`}
+              className={`px-2.5 py-1 text-[10px] font-light rounded-[2px] transition-all duration-150 ease-out-expo ${viewMode === 'fixed' ? 'bg-[var(--text-color)] text-[var(--bg-color)] border border-[var(--text-color)]' : 'text-[var(--text-muted)] hover:text-[var(--text-color)] border border-transparent'}`}
             >
               Fixed ID Grid
             </button>
@@ -509,8 +534,8 @@ export const LiveViewer: React.FC = () => {
             {showColumnDropdown && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setShowColumnDropdown(false)} />
-                <div className="absolute right-0 mt-2 w-56 bg-[var(--bg-card-sub)] border border-[var(--border-color)] rounded-lg shadow-xl p-3 z-50 text-left space-y-2 text-xs">
-                  <div className="font-bold text-[10px] text-[var(--text-muted)] uppercase tracking-wider pb-1 border-b border-[var(--border-color)]">Visible Columns</div>
+                <div className="absolute right-0 mt-2 w-56 bg-[var(--bg-card-sub)] border border-[var(--border-color)] rounded-[3px] shadow-none p-3 z-50 text-left space-y-2 text-xs">
+                  <div className="font-light text-[9px] text-[var(--text-muted)] uppercase tracking-wider pb-1 border-b border-[var(--border-color)]">Visible Columns</div>
                   <div className="grid grid-cols-1 gap-1 max-h-64 overflow-y-auto">
                     {Object.entries({
                       time: 'Time (ms)', delta: 'Delta (ms)', dir: 'Direction', id: 'CAN ID',
@@ -519,8 +544,8 @@ export const LiveViewer: React.FC = () => {
                         : { functionCode: 'Function Code', nodeId: 'Node ID', canopenIndex: 'SDO Index / Sub' }),
                       dlc: 'DLC', payload: 'Payload (Hex)', dbcName: 'DBC Message Name', srcDevice: 'Source Device', decodedData: 'Decoded Signals',
                     }).map(([key, label]) => (
-                      <label key={key} className="flex items-center gap-2 cursor-pointer hover:bg-[var(--bg-input)] p-1 rounded transition-colors select-none">
-                        <input type="checkbox" checked={visibleColumns[key]} onChange={() => setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }))} className="rounded bg-black/10 border-[var(--border-color)] text-cyber-accent focus:ring-0 w-3.5 h-3.5" />
+                      <label key={key} className="flex items-center gap-2 cursor-pointer hover:bg-[var(--bg-input)] p-1 rounded-[2px] transition-colors select-none">
+                        <input type="checkbox" checked={visibleColumns[key]} onChange={() => setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }))} className="rounded-[2px] bg-black/10 border-[var(--border-color)] text-cyber-accent focus:ring-0 w-3.5 h-3.5" />
                         <span className="text-[var(--text-color)] text-xs">{label}</span>
                       </label>
                     ))}
@@ -700,7 +725,7 @@ export const LiveViewer: React.FC = () => {
                   payloadByteVal: '',
                   highlightActiveBytes: true
                 })}
-                className="text-[10px] text-red-500 hover:text-red-600 dark:hover:text-red-400 font-bold flex items-center gap-1 transition-colors border border-transparent hover:border-red-500/20 px-2 py-0.5 rounded"
+                className="text-[10px] text-red-500 hover:text-red-600 dark:hover:text-red-400 font-light flex items-center gap-1 transition-colors border border-transparent hover:border-red-500/20 px-2 py-0.5 rounded-[2px]"
               >
                 <RotateCcw className="w-3 h-3" />
                 Reset
@@ -711,7 +736,7 @@ export const LiveViewer: React.FC = () => {
         </div>
       )}
 
-      <div className="flex-1 overflow-auto rounded border border-[var(--border-sub)] bg-[var(--bg-card-sub)]">
+      <div className="flex-1 overflow-auto rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card-sub)]">
         <table className="w-full text-left text-xs font-mono border-collapse">
           <thead className="sticky top-0 bg-[var(--bg-table-header)] text-[10px] text-[var(--text-muted)] border-b border-[var(--border-color)] uppercase tracking-wider select-none z-10">
             <tr>
@@ -760,7 +785,7 @@ export const LiveViewer: React.FC = () => {
                     <tr onClick={() => setExpandedRowKey(isExpanded ? null : rowExpansionKey)} className={`hover:bg-[var(--bg-input)] cursor-pointer transition-colors ${log.direction === 'TX' ? 'bg-blue-500/5' : ''}`}>
                       {visibleColumns.time && <td className="py-2 px-3 text-[var(--text-muted)]">{log.timestamp}</td>}
                       {visibleColumns.delta && <td className={`py-2 px-3 col-hide-narrow font-semibold ${log.delta > 200 ? 'text-amber-500' : 'text-[var(--text-muted)]'}`}>+{typeof log.delta === 'number' ? log.delta.toFixed(1) : log.delta}</td>}
-                      {visibleColumns.dir && <td className="py-2 px-3 col-hide-narrow"><span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${log.direction === 'TX' ? 'bg-blue-500/10 text-blue-500 border border-blue-500/20' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'}`}>{log.direction}</span></td>}
+                      {visibleColumns.dir && <td className="py-2 px-3 col-hide-narrow"><span className={`px-1.5 py-0.5 rounded-[2px] text-[9px] font-light ${log.direction === 'TX' ? 'bg-blue-500/10 text-blue-500 border border-blue-500/20' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'}`}>{log.direction}</span></td>}
                       {visibleColumns.id && <td className={`py-2 px-3 font-semibold ${protocol === 'j1939' ? 'text-cyber-j1939' : 'text-cyber-canopen'}`}>{idHex}</td>}
                       {protocol === 'j1939' && (
                         <>
@@ -810,7 +835,7 @@ export const LiveViewer: React.FC = () => {
                                     boxShadow: `0 0 ${ratio * 6}px rgba(${r}, ${g}, ${b}, ${ratio * 0.25})`
                                   };
                                   textStyle = {
-                                    fontWeight: 'bold',
+                                    fontWeight: 'normal',
                                     color: 'var(--text-color)'
                                   };
                                 }
@@ -818,7 +843,7 @@ export const LiveViewer: React.FC = () => {
                               return (
                                 <span
                                   key={idx}
-                                  className="px-1 py-0.5 rounded border border-transparent text-[11px] transition-colors duration-150"
+                                  className="px-1 py-0.5 rounded-[2px] border border-transparent text-[11px] transition-colors duration-150"
                                   style={{ ...bgStyle, ...textStyle }}
                                   title={`Byte ${idx}: Dec ${byte} | Bin ${byte.toString(2).padStart(8, '0')}`}
                                 >
@@ -829,13 +854,13 @@ export const LiveViewer: React.FC = () => {
                           </div>
                         </td>
                       )}
-                      {visibleColumns.dbcName && <td className="py-2 px-3 text-[var(--text-color)] font-medium"><span className="truncate max-w-[150px] block" title={log.name || 'Unknown'}>{log.name || 'Unknown'}</span></td>}
-                      {visibleColumns.srcDevice && <td className="py-2 px-3 col-hide-narrow text-[var(--text-color)] font-medium"><span className="truncate max-w-[150px] block" title={protocol === 'j1939' && j1939Details ? getNickname(j1939Details.sa) : getNickname(log.id & 0x07F)}>{protocol === 'j1939' && j1939Details ? getNickname(j1939Details.sa) : getNickname(log.id & 0x07F)}</span></td>}
-                      {visibleColumns.decodedData && <td className="py-2 px-3 text-[var(--text-color)] font-medium"><span className="truncate max-w-[280px] block text-[10px]" title={formatDecodedSignals(log.decodedSignals, activeDbcName)}>{formatDecodedSignals(log.decodedSignals, activeDbcName)}</span></td>}
+                      {visibleColumns.dbcName && <td className="py-2 px-3 text-[var(--text-color)] font-normal"><span className="truncate max-w-[150px] block" title={log.name || 'Unknown'}>{log.name || 'Unknown'}</span></td>}
+                      {visibleColumns.srcDevice && <td className="py-2 px-3 col-hide-narrow text-[var(--text-color)] font-normal"><span className="truncate max-w-[150px] block" title={protocol === 'j1939' && j1939Details ? getNickname(j1939Details.sa) : getNickname(log.id & 0x07F)}>{protocol === 'j1939' && j1939Details ? getNickname(j1939Details.sa) : getNickname(log.id & 0x07F)}</span></td>}
+                      {visibleColumns.decodedData && <td className="py-2 px-3 text-[var(--text-color)] font-normal"><span className="truncate max-w-[280px] block text-[10px]" title={formatDecodedSignals(log.decodedSignals, activeDbcName)}>{formatDecodedSignals(log.decodedSignals, activeDbcName)}</span></td>}
                       <td className="py-2 px-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
                           {isUnrecognized && (
-                            <button onClick={(e) => { e.stopPropagation(); setUnrecognizedMsg({ id: log.id, dlc: log.dlc }); setNewMsgName(protocol === 'j1939' && j1939Details ? `PGN_${j1939Details.pgn}` : `COB_0x${log.id.toString(16).toUpperCase()}`); }} className="p-0.5 rounded hover:bg-[var(--bg-input)] text-cyber-canopen hover:text-amber-400 transition-colors" title="Add Message Template to Active DBC"><Plus className="w-3.5 h-3.5" /></button>
+                            <button onClick={(e) => { e.stopPropagation(); setUnrecognizedMsg({ id: log.id, dlc: log.dlc }); setNewMsgName(protocol === 'j1939' && j1939Details ? `PGN_${j1939Details.pgn}` : `COB_0x${log.id.toString(16).toUpperCase()}`); }} className="p-0.5 rounded-[2px] hover:bg-[var(--bg-input)] text-cyber-canopen hover:text-amber-400 transition-colors" title="Add Message Template to Active DBC"><Plus className="w-3.5 h-3.5" /></button>
                           )}
                           {isExpanded ? <ChevronDown className="w-3.5 h-3.5 text-[var(--text-muted)]" /> : <ChevronRight className="w-3.5 h-3.5 text-[var(--text-muted)]" />}
                         </div>
@@ -847,38 +872,38 @@ export const LiveViewer: React.FC = () => {
                           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 border-l-2 border-[var(--border-color)] pl-4">
                             
                             {/* Column Left: Decoded DBC Signals */}
-                            <div className="lg:col-span-5 space-y-3">
+                            <div className="lg:col-span-5 space-y-3 font-sans">
                               {/* CANopen Protocol Inspector */}
                               {protocol === 'canopen' && canopenDetails && (
-                                <div className="bg-[var(--bg-input)] rounded p-3 border border-cyber-canopen/20 space-y-2 shadow-sm">
-                                  <div className="text-[10px] font-bold text-cyber-canopen uppercase tracking-wider flex items-center gap-1.5 border-b border-cyber-canopen/10 pb-1.5 select-none">
+                                <div className="bg-[var(--bg-input)] rounded-[3px] p-3 border border-cyber-canopen/20 space-y-2">
+                                  <div className="text-[10px] font-light text-cyber-canopen uppercase tracking-wider flex items-center gap-1.5 border-b border-cyber-canopen/10 pb-1.5 select-none">
                                     <Activity className="w-3.5 h-3.5" /> CANopen Protocol Inspector
                                   </div>
                                   <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
-                                    <div className="bg-[var(--bg-card-sub)] p-1.5 rounded border border-[var(--border-sub)]">
+                                    <div className="bg-[var(--bg-card-sub)] p-1.5 rounded-[2px] border border-[var(--border-color)]">
                                       <span className="text-[8px] text-[var(--text-muted)] block font-sans">COB-ID</span>
-                                      <span className="font-bold text-[var(--text-color)]">0x{log.id.toString(16).toUpperCase()}</span>
+                                      <span className="font-normal text-[var(--text-color)]">0x{log.id.toString(16).toUpperCase()}</span>
                                     </div>
-                                    <div className="bg-[var(--bg-card-sub)] p-1.5 rounded border border-[var(--border-sub)]">
+                                    <div className="bg-[var(--bg-card-sub)] p-1.5 rounded-[2px] border border-[var(--border-color)]">
                                       <span className="text-[8px] text-[var(--text-muted)] block font-sans">Node ID</span>
-                                      <span className="font-bold text-[var(--text-color)]">{canopenDetails.nodeId} (0x{canopenDetails.nodeId.toString(16).toUpperCase()})</span>
+                                      <span className="font-normal text-[var(--text-color)]">{canopenDetails.nodeId} (0x{canopenDetails.nodeId.toString(16).toUpperCase()})</span>
                                     </div>
-                                    <div className="bg-[var(--bg-card-sub)] p-1.5 rounded border border-[var(--border-sub)] col-span-2">
+                                    <div className="bg-[var(--bg-card-sub)] p-1.5 rounded-[2px] border border-[var(--border-color)] col-span-2">
                                       <span className="text-[8px] text-[var(--text-muted)] block font-sans">Function Code</span>
-                                      <span className="font-bold text-cyber-canopen">0x{canopenDetails.functionCode.toString(16).toUpperCase()} ({canopenDetails.interpretation})</span>
+                                      <span className="font-normal text-cyber-canopen">0x{canopenDetails.functionCode.toString(16).toUpperCase()} ({canopenDetails.interpretation})</span>
                                     </div>
                                     {canopenSdoDetails && (
                                       <>
-                                        <div className="bg-[var(--bg-card-sub)] p-1.5 rounded border border-[var(--border-sub)]">
+                                        <div className="bg-[var(--bg-card-sub)] p-1.5 rounded-[2px] border border-[var(--border-color)]">
                                           <span className="text-[8px] text-[var(--text-muted)] block font-sans">SDO Index</span>
-                                          <span className="font-bold text-[var(--text-color)]">0x{canopenSdoDetails.index.toString(16).toUpperCase()}</span>
+                                          <span className="font-normal text-[var(--text-color)]">0x{canopenSdoDetails.index.toString(16).toUpperCase()}</span>
                                         </div>
-                                        <div className="bg-[var(--bg-card-sub)] p-1.5 rounded border border-[var(--border-sub)]">
+                                        <div className="bg-[var(--bg-card-sub)] p-1.5 rounded-[2px] border border-[var(--border-color)]">
                                           <span className="text-[8px] text-[var(--text-muted)] block font-sans">SDO Sub</span>
-                                          <span className="font-bold text-[var(--text-color)]">0x{canopenSdoDetails.subIndex.toString(16).toUpperCase()}</span>
+                                          <span className="font-normal text-[var(--text-color)]">0x{canopenSdoDetails.subIndex.toString(16).toUpperCase()}</span>
                                         </div>
                                         {getWellKnownSdoName(canopenSdoDetails.index) && (
-                                          <div className="bg-cyber-canopen/5 p-2 rounded border border-cyber-canopen/15 col-span-2 text-[9px] font-sans text-cyber-canopen">
+                                          <div className="bg-cyber-canopen/5 p-2 rounded-[2px] border border-cyber-canopen/15 col-span-2 text-[9px] font-sans text-cyber-canopen">
                                             <strong>Object:</strong> {getWellKnownSdoName(canopenSdoDetails.index)}
                                           </div>
                                         )}
@@ -888,39 +913,66 @@ export const LiveViewer: React.FC = () => {
                                 </div>
                               )}
 
-                              <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider flex items-center gap-1.5">
+                              <div className="text-[10px] font-light text-[var(--text-muted)] uppercase tracking-wider flex items-center gap-1.5">
                                 <Activity className="w-3.5 h-3.5" /> Decoded Database Signals
                               </div>
                               {!log.decodedSignals || Object.keys(log.decodedSignals).length === 0 ? (
-                                <div className="text-xs text-[var(--text-muted)] italic p-3 bg-[var(--bg-input)] rounded border border-[var(--border-sub)]">
+                                <div className="text-xs text-[var(--text-muted)] italic p-3 bg-[var(--bg-input)] rounded-[3px] border border-[var(--border-color)]">
                                   No DBC signals matched this message. Add signals in the DBC Manager to decode it.
                                 </div>
                               ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                                   {Object.entries(log.decodedSignals).map(([sigName, val]) => {
                                     let unit = '';
+                                    let valDesc = '';
+                                    let found = false;
+                                    
                                     const activeDbcObj = dbcs[activeDbcName];
                                     if (activeDbcObj) { 
                                       Object.values(activeDbcObj.messages).forEach(m => { 
                                         const s = m.signals.find(s => s.name === sigName); 
-                                        if (s) unit = s.unit; 
+                                        if (s) {
+                                          unit = s.unit; 
+                                          if (s.valueDescriptions && s.valueDescriptions[val] !== undefined) {
+                                            valDesc = s.valueDescriptions[val];
+                                          }
+                                          found = true;
+                                        }
                                       }); 
                                     }
+                                    
+                                    if (!found) {
+                                      for (const db of Object.values(dbcs)) {
+                                        Object.values(db.messages).forEach(m => {
+                                          const s = m.signals.find(s => s.name === sigName);
+                                          if (s) {
+                                            unit = s.unit;
+                                            if (s.valueDescriptions && s.valueDescriptions[val] !== undefined) {
+                                              valDesc = s.valueDescriptions[val];
+                                            }
+                                          }
+                                        });
+                                      }
+                                    }
+
                                     const isPlotted = plotSignals.includes(sigName);
+                                    const formattedVal = typeof val === 'number' ? val.toFixed(3).replace(/\.?0+$/, '') : val;
+                                    const displayVal = valDesc ? `${valDesc} (${formattedVal})` : formattedVal;
+
                                     return (
-                                      <div key={sigName} className="bg-[var(--bg-input)] rounded p-2.5 border border-[var(--border-sub)] flex items-center justify-between shadow-sm">
+                                      <div key={sigName} className="bg-[var(--bg-input)] rounded-[3px] p-2.5 border border-[var(--border-color)] flex items-center justify-between shadow-none font-sans">
                                         <div className="text-left min-w-0 pr-2">
-                                          <span className="text-[10px] font-semibold text-[var(--text-muted)] block truncate" title={sigName}>{sigName}</span>
-                                          <span className="text-xs font-bold text-[var(--text-color)] block truncate">
-                                            {typeof val === 'number' ? val.toFixed(3).replace(/\.?0+$/, '') : val}
-                                            <span className="text-[9px] text-[var(--text-muted)] ml-1 font-medium">{unit}</span>
+                                          <span className="text-[10px] font-light text-[var(--text-muted)] block truncate" title={sigName}>{sigName}</span>
+                                          <span className="text-xs font-normal text-[var(--text-color)] block truncate">
+                                            {displayVal}
+                                            <span className="text-[9px] text-[var(--text-muted)] ml-1 font-light">{unit}</span>
                                           </span>
                                         </div>
                                         <button 
                                           onClick={(e) => { e.stopPropagation(); togglePlotSignal(sigName); }} 
-                                          className={`flex items-center gap-1 px-2 py-1 rounded text-[8px] font-bold transition-all border shrink-0 ${
+                                          className={`flex items-center gap-1 px-2 py-1 rounded-[2px] text-[8px] font-light transition-all border shrink-0 ${
                                             isPlotted 
-                                              ? 'bg-sky-500/10 border-sky-500/30 text-sky-600 dark:text-sky-400' 
+                                              ? 'bg-sky-500/10 border-sky-500/30 text-sky-600 dark:text-sky-400 font-normal' 
                                               : 'bg-[var(--bg-card-sub)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-color)]'
                                           }`}
                                         >
@@ -935,16 +987,16 @@ export const LiveViewer: React.FC = () => {
                             </div>
 
                             {/* Column Right: Bit & Byte Analyzer (Reverse Engineering) */}
-                            <div className="lg:col-span-7 space-y-4">
-                              <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider flex items-center gap-1.5">
+                            <div className="lg:col-span-7 space-y-4 font-sans">
+                              <div className="text-[10px] font-light text-[var(--text-muted)] uppercase tracking-wider flex items-center gap-1.5">
                                 <Binary className="w-3.5 h-3.5" /> Bit & Byte Analyzer (Reverse Engineering)
                               </div>
 
                               <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                                 {/* 8x8 Bit Matrix Visualizer */}
-                                <div className="md:col-span-5 flex flex-col justify-center items-center bg-[var(--bg-input)] border border-[var(--border-sub)] rounded-lg p-3 shadow-inner">
-                                  <div className="text-[10px] font-bold text-[var(--text-muted)] mb-2 uppercase tracking-wide">64-Bit Grid</div>
-                                  <div className="grid grid-cols-8 gap-1 p-1 bg-black/10 rounded">
+                                <div className="md:col-span-5 flex flex-col justify-center items-center bg-[var(--bg-input)] border border-[var(--border-color)] rounded-[3px] p-3 shadow-none">
+                                  <div className="text-[10px] font-light text-[var(--text-muted)] mb-2 uppercase tracking-wide">64-Bit Grid</div>
+                                  <div className="grid grid-cols-8 gap-1 p-1 bg-black/10 rounded-[3px]">
                                     {Array.from({ length: 8 }).map((_, byteIdx) => {
                                       const byteVal = byteIdx < log.data.length ? log.data[byteIdx] : 0;
                                       return Array.from({ length: 8 }).map((_, bitIdx) => {
@@ -960,11 +1012,11 @@ export const LiveViewer: React.FC = () => {
                                           <div
                                             key={`${byteIdx}-${bitIdx}`}
                                             onClick={() => toggleTrackBit(log.id, byteIdx, bitPos)}
-                                            className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold cursor-pointer transition-all select-none border ${
+                                            className={`w-6 h-6 rounded-[2px] flex items-center justify-center text-[10px] font-normal cursor-pointer transition-all select-none border ${
                                               isTracked
-                                                ? 'bg-blue-500/30 border-blue-400 text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.6)] scale-105'
+                                                ? 'bg-blue-500/30 border-blue-400 text-blue-400'
                                                 : isBitSet
-                                                  ? 'bg-cyber-accent/20 border-cyber-accent/50 text-cyber-accent shadow-sm glow-accent'
+                                                  ? 'bg-cyber-accent/20 border-cyber-accent/50 text-cyber-accent'
                                                   : 'bg-[var(--bg-card-sub)] border-[var(--border-color)]/60 text-[var(--text-muted)]/60'
                                             }`}
                                             title={`Global Bit ${globalBitIdx} (Byte ${byteIdx}, Bit ${bitPos}) ${isTracked ? '[TRACKED]' : '[Click to Track]'}`}
@@ -975,14 +1027,14 @@ export const LiveViewer: React.FC = () => {
                                       });
                                     })}
                                   </div>
-                                  <div className="flex justify-between w-full max-w-[210px] mt-2 text-[8px] text-[var(--text-muted)] font-bold uppercase px-1">
+                                  <div className="flex justify-between w-full max-w-[210px] mt-2 text-[8px] text-[var(--text-muted)] font-light uppercase px-1">
                                     <span>B0 LSB</span>
                                     <span>B7 MSB</span>
                                   </div>
                                 </div>
 
                                 {/* Byte Details Table */}
-                                <div className="md:col-span-7 bg-[var(--bg-input)] border border-[var(--border-sub)] rounded-lg p-2.5 overflow-x-auto shadow-sm">
+                                <div className="md:col-span-7 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-[3px] p-2.5 overflow-x-auto shadow-none">
                                   <table className="w-full text-left border-collapse text-[10px] font-mono">
                                     <thead>
                                       <tr className="text-[9px] text-[var(--text-muted)] uppercase border-b border-[var(--border-color)] pb-1">
@@ -1037,7 +1089,7 @@ export const LiveViewer: React.FC = () => {
                               </div>
 
                               {/* Help tips / Action */}
-                              <div className="flex items-center justify-between text-[10px] bg-cyber-j1939/5 border border-cyber-j1939/20 rounded p-2 text-cyan-600 dark:text-cyan-400">
+                              <div className="flex items-center justify-between text-[10px] bg-cyber-j1939/5 border border-cyber-j1939/20 rounded-[3px] p-2 text-cyan-600 dark:text-cyan-400">
                                 <span>
                                   <strong>💡 Decoding Tip:</strong> Look for bytes with high <strong>Changes</strong> and shifting <strong>Min/Max</strong> ranges. These represent changing variables (counters, sensors). Static bytes (0 changes) are configuration status fields.
                                 </span>
@@ -1057,25 +1109,25 @@ export const LiveViewer: React.FC = () => {
       </div>
 
       {unrecognizedMsg && createPortal(
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="glass-panel p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-            <h3 className="text-sm font-bold text-[var(--text-color)] mb-4">Add Unrecognized Message to DBC</h3>
-            <div className="bg-[var(--bg-card-sub)] border border-[var(--border-color)] rounded p-2.5 mb-3 text-xs space-y-1">
+            <h3 className="text-sm font-light text-[var(--text-color)] mb-4">Add Unrecognized Message to DBC</h3>
+            <div className="bg-[var(--bg-card-sub)] border border-[var(--border-color)] rounded-[3px] p-2.5 mb-3 text-xs space-y-1 font-sans">
               <div>CAN ID: <strong className="font-mono">0x{unrecognizedMsg.id.toString(16).toUpperCase()}</strong></div>
               <div>DLC: <strong>{unrecognizedMsg.dlc} bytes</strong></div>
             </div>
-            <form onSubmit={handleSaveUnrecognized} className="space-y-3.5">
+            <form onSubmit={handleSaveUnrecognized} className="space-y-3.5 font-sans">
               <div>
-                <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">Message Name</label>
+                <label className="block text-[10px] font-light text-[var(--text-muted)] uppercase mb-1">Message Name</label>
                 <input type="text" value={newMsgName} onChange={e => setNewMsgName(e.target.value)} className="glass-input w-full text-xs" placeholder="e.g. EngineTempStatus" required />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">Sender Node</label>
+                <label className="block text-[10px] font-light text-[var(--text-muted)] uppercase mb-1">Sender Node</label>
                 <input type="text" value={newMsgSender} onChange={e => setNewMsgSender(e.target.value)} className="glass-input w-full text-xs" placeholder="e.g. Vector__XXX" required />
               </div>
               <div className="flex gap-2.5 pt-2">
                 <button type="button" onClick={() => setUnrecognizedMsg(null)} className="flex-1 glass-button text-xs">Cancel</button>
-                <button type="submit" className="flex-1 bg-cyber-accent border border-cyber-accent/40 text-black hover:bg-emerald-400 text-xs font-bold rounded py-1.5 active:scale-95 transition-all">Save to DBC</button>
+                <button type="submit" className="flex-1 bg-[var(--text-color)] text-[var(--bg-color)] border border-[var(--text-color)] hover:opacity-85 text-xs font-light rounded-[3px] py-1.5 transition-all ease-out-expo">Save to DBC</button>
               </div>
             </form>
           </div>

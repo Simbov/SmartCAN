@@ -66,50 +66,62 @@ const SignalValueDescriptions: React.FC<SignalValueDescriptionsProps> = ({ value
   const entries = Object.entries(valueDescriptions).sort((a, b) => parseInt(a[0], 10) - parseInt(b[0], 10));
 
   return (
-    <div className="mt-3 border-t border-[var(--border-sub)] pt-2 flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-wider">Value Descriptions (VAL_)</span>
+    <div className="mt-4 border border-[var(--border-sub)] rounded-lg p-3 bg-[var(--bg-card)]/50 flex flex-col gap-2.5">
+      <div className="flex items-center justify-between border-b border-[var(--border-sub)] pb-1.5">
+        <span className="text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-wider flex items-center gap-1">
+          <Sliders className="w-3 h-3 text-sky-500" /> Value Mappings (VAL_)
+        </span>
+        <span className="text-[9px] text-[var(--text-muted)] italic">Map raw values to names</span>
       </div>
       
       {/* Existing entries */}
-      {entries.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 max-h-[100px] overflow-y-auto p-1 bg-[var(--bg-input)] rounded border border-[var(--border-color)]">
+      {entries.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto p-1.5 bg-[var(--bg-input)] rounded border border-[var(--border-sub)]">
           {entries.map(([val, desc]) => (
-            <div key={val} className="flex items-center gap-1.5 px-2 py-0.5 bg-[var(--bg-card)] border border-[var(--border-sub)] rounded text-[10px]">
+            <div key={val} className="flex items-center gap-1.5 px-2.5 py-1 bg-[var(--bg-card)] border border-[var(--border-color)] rounded shadow-sm text-[10px] hover:border-sky-500/50 transition-colors">
               <span className="font-mono font-bold text-sky-600 dark:text-sky-400">{val}:</span>
-              <span className="text-[var(--text-color)]">{desc}</span>
+              <span className="text-[var(--text-color)] font-medium">{desc}</span>
               <button
                 type="button"
                 onClick={() => handleRemove(val)}
-                className="text-red-400 hover:text-red-600 ml-1 font-bold"
+                className="text-red-400 hover:text-red-600 ml-1 font-bold transition-colors text-xs"
+                title="Remove mapping"
               >
                 ×
               </button>
             </div>
           ))}
         </div>
+      ) : (
+        <div className="text-[10px] text-[var(--text-muted)] italic text-center py-2 bg-[var(--bg-input)] rounded border border-dashed border-[var(--border-sub)]">
+          No value mappings defined yet. Add them below.
+        </div>
       )}
 
       {/* Add new entry */}
-      <div className="flex gap-2 items-center">
-        <input
-          type="number"
-          placeholder="Val"
-          value={newValue}
-          onChange={(e) => setNewValue(e.target.value)}
-          className="glass-input py-0.5 px-2 text-[10px] font-mono w-16"
-        />
-        <input
-          type="text"
-          placeholder="Description (e.g. Active)"
-          value={newDesc}
-          onChange={(e) => setNewDesc(e.target.value)}
-          className="glass-input py-0.5 px-2 text-[10px] flex-1"
-        />
+      <div className="flex gap-2 items-center mt-1">
+        <div className="relative flex-shrink-0">
+          <input
+            type="number"
+            placeholder="Val"
+            value={newValue}
+            onChange={(e) => setNewValue(e.target.value)}
+            className="glass-input py-1 px-2.5 text-xs font-mono w-20 placeholder:text-[var(--text-muted)]/70"
+          />
+        </div>
+        <div className="flex-1 relative">
+          <input
+            type="text"
+            placeholder="Description (e.g. Active, Fault...)"
+            value={newDesc}
+            onChange={(e) => setNewDesc(e.target.value)}
+            className="glass-input py-1 px-2.5 text-xs w-full placeholder:text-[var(--text-muted)]/70"
+          />
+        </div>
         <button
           type="button"
           onClick={handleAdd}
-          className="px-2.5 py-0.5 bg-sky-500 hover:bg-sky-600 text-white rounded text-[10px] font-semibold active:scale-95 transition-all"
+          className="px-3 py-1 bg-sky-500 hover:bg-sky-600 text-white rounded text-xs font-semibold active:scale-95 transition-all shadow-sm flex items-center justify-center gap-1 shrink-0"
         >
           Add
         </button>
@@ -556,6 +568,41 @@ export const DbcManager: React.FC = () => {
     }
   };
 
+  const handleTabChange = (targetTab: 'inspect' | 'graphical' | 'raw') => {
+    if (activeTab === targetTab) return;
+
+    if (activeTab === 'raw') {
+      // Validate and parse raw schema edits before allowing navigation
+      try {
+        const parsed = parseDbc(editingDbcContent);
+        setDraftDb(parsed);
+      } catch (err: any) {
+        alert(`Cannot switch tabs: Invalid DBC syntax in raw editor.\nError: ${err.message}`);
+        return;
+      }
+    }
+
+    if (activeTab === 'graphical' && draftDb) {
+      // Serialize visual editor draft database into raw text
+      const serialized = serializeDbc(draftDb);
+      setEditingDbcContent(serialized);
+    }
+
+    if (targetTab === 'graphical') {
+      setEditingMsgId(null);
+      // If we came from inspect and didn't parse from raw, synchronize draftDb
+      if (activeTab === 'inspect' && inspectedEntry) {
+        try {
+          setDraftDb(parseDbc(editingDbcContent));
+        } catch {
+          setDraftDb({ nodes: [], messages: {} });
+        }
+      }
+    }
+
+    setActiveTab(targetTab);
+  };
+
   // Filter registry entries by category
   const customDBCs = dbcRegistry.filter(db => db.type === 'custom');
   const genericDBCs = dbcRegistry.filter(db => db.type === 'generic');
@@ -968,7 +1015,7 @@ export const DbcManager: React.FC = () => {
               {/* Tab Bar */}
               <div className="flex border-b border-[var(--border-color)] pb-2 flex-shrink-0 gap-1">
                 <button
-                  onClick={() => setActiveTab('inspect')}
+                  onClick={() => handleTabChange('inspect')}
                   className={`px-4 py-1.5 text-xs font-bold transition-all duration-150 border-b-2 flex items-center gap-1.5 ${
                     activeTab === 'inspect'
                       ? 'border-sky-500 text-sky-600 dark:text-sky-400'
@@ -979,17 +1026,7 @@ export const DbcManager: React.FC = () => {
                   Inspect Signals
                 </button>
                 <button
-                  onClick={() => {
-                    setActiveTab('graphical');
-                    setEditingMsgId(null);
-                    if (inspectedEntry) {
-                      try {
-                        setDraftDb(parseDbc(inspectedEntry.content));
-                      } catch {
-                        setDraftDb({ nodes: [], messages: {} });
-                      }
-                    }
-                  }}
+                  onClick={() => handleTabChange('graphical')}
                   className={`px-4 py-1.5 text-xs font-bold transition-all duration-150 border-b-2 flex items-center gap-1.5 ${
                     activeTab === 'graphical'
                       ? 'border-sky-500 text-sky-600 dark:text-sky-400'
@@ -1000,7 +1037,7 @@ export const DbcManager: React.FC = () => {
                   Edit Graphically
                 </button>
                 <button
-                  onClick={() => setActiveTab('raw')}
+                  onClick={() => handleTabChange('raw')}
                   className={`px-4 py-1.5 text-xs font-bold transition-all duration-150 border-b-2 flex items-center gap-1.5 ${
                     activeTab === 'raw'
                       ? 'border-sky-500 text-sky-600 dark:text-sky-400'
@@ -1079,6 +1116,21 @@ export const DbcManager: React.FC = () => {
                                 <div className="col-span-2 md:col-span-3">
                                   <span className="block text-[10px] text-[var(--text-muted)] mb-0.5">Receiver Nodes</span>
                                   <strong className="text-[var(--text-color)] truncate block" title={sig.receivers.join(', ')}>{sig.receivers.join(', ')}</strong>
+                                </div>
+                              )}
+                              {sig.valueDescriptions && Object.keys(sig.valueDescriptions).length > 0 && (
+                                <div className="col-span-2 md:col-span-3 mt-2 pt-2 border-t border-[var(--border-sub)]">
+                                  <span className="block text-[10px] text-[var(--text-muted)] mb-1 uppercase tracking-wider font-bold">Value Mappings (VAL_)</span>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {Object.entries(sig.valueDescriptions)
+                                      .sort((a, b) => parseInt(a[0], 10) - parseInt(b[0], 10))
+                                      .map(([val, desc]) => (
+                                        <span key={val} className="px-2 py-0.5 bg-[var(--bg-input)] border border-[var(--border-sub)] rounded text-[10px] font-medium text-[var(--text-color)]">
+                                          <strong className="text-sky-600 dark:text-sky-400 mr-1 font-mono">{val}:</strong>
+                                          {desc}
+                                        </span>
+                                      ))}
+                                  </div>
                                 </div>
                               )}
                             </div>

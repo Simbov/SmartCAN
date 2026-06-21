@@ -37,6 +37,37 @@ export async function saveTextFile(
   }
 
   // Web Browser Fallback
+  if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
+    try {
+      const ext = filename.split('.').pop() || 'txt';
+      let mimeType = 'text/plain';
+      if (ext === 'json' || ext === 'smartcan') {
+        mimeType = 'application/json';
+      } else if (ext === 'csv') {
+        mimeType = 'text/csv';
+      }
+
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: filename,
+        types: [{
+          description: extensionFilters[0]?.name || 'Files',
+          accept: {
+            [mimeType]: [`.${ext}`]
+          }
+        }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(content);
+      await writable.close();
+      return true;
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        return false;
+      }
+      console.warn('showSaveFilePicker failed, falling back to download link:', err);
+    }
+  }
+
   try {
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);

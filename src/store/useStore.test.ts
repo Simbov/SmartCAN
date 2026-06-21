@@ -17,7 +17,7 @@ describe('Zustand store (CanStore)', () => {
     expect(state.isConnected).toBe(false);
     expect(state.kvaserStatus).toBe('offline');
     expect(state.logs.length).toBe(0);
-    expect(state.devices.length).toBeGreaterThan(0);
+    expect(state.devices.length).toBe(0);
   });
 
   it('should change protocol, loading correct defaults', () => {
@@ -26,7 +26,7 @@ describe('Zustand store (CanStore)', () => {
     let state = useStore.getState();
     expect(state.protocol).toBe('canopen');
     expect(state.activeDbcName).toBe('Default CANopen Database');
-    expect(state.devices[0].name).toContain('PDO');
+    expect(state.devices.length).toBe(0);
 
     useStore.getState().setProtocol('j1939');
     
@@ -93,6 +93,9 @@ describe('Zustand store (CanStore)', () => {
   });
 
   it('should add logs and calculate delta times', () => {
+    // Add a device for SA=1 to allow DBC decoding
+    useStore.getState().addDevice({ id: 'dev-1', name: 'Engine ECU', nodeId: 1, enabled: true, isSimulated: true });
+
     // Send 1st message
     useStore.getState().addLog({
       timestamp: 100,
@@ -250,6 +253,10 @@ describe('Zustand store (CanStore)', () => {
   it('should decode messages concurrently across multiple enabled DBCs', () => {
     const store = useStore.getState();
     
+    // Add devices for SA=1 and SA=0 to allow DBC decoding
+    store.addDevice({ id: 'dev-1', name: 'Engine ECU', nodeId: 1, enabled: true, isSimulated: true });
+    store.addDevice({ id: 'dev-2', name: 'BMS', nodeId: 0, enabled: true, isSimulated: true });
+
     // Enable Default J1939 (in case it was disabled) and Orion BMS
     if (!store.dbcRegistry.find(e => e.name === 'Default J1939 Database')?.enabled) {
       store.toggleDbcInProject('Default J1939 Database');
@@ -287,6 +294,9 @@ describe('Zustand store (CanStore)', () => {
 
   it('should save and load configurations via JSON', () => {
     const actions = useStore.getState();
+
+    // Add dev-1 device since default project now starts empty
+    actions.addDevice({ id: 'dev-1', name: 'Engine ECU', nodeId: 1, enabled: true, isSimulated: true });
 
     // Modify active project
     actions.addProject('Export Import Project');

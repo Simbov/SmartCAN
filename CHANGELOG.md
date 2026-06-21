@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Teenage Engineering Inspired UI**: Refactored the dashboard and components to present a quiet, high-density industrial catalog style using Canvas Mist background, Steel Gray hairlines, Ink Black typography, zero drop shadows, and sharp 3px chamfers.
+- **Emil Kowalski Micro-Interactions**: Optimized interactive animations and transitions with a snappy `ease-out-expo` transition curve and distinct interactive state behaviors.
+- **Value Description Support**: Decoded text/enum value descriptions (`VAL_` definitions) are now displayed in the live CAN monitor table and plotter panels.
+- **Browser-Native Save Picker**: Added an option to prompt the user to choose their desired save location using standard file pickers when saving configuration files.
+
+### Fixed
+- **Robust CANking CSV Import**: Standardized column parsing (`Time, Channel, id, Flags, DLC, Data 0-7, Counter`) to correctly import all 8 bytes of payloads and parse timestamps accurately.
+- **DBC Mimic Mode Validation**: DBC decoders are now only applied to frames once the sending node's Source Address is defined in the project's logical devices.
+- **Complex DBC Parsing**: Hardened regexes in the DBC parser to robustly handle files with various flags and whitespace quirks, including `VAL_` entries with trailing flags or other annotations.
+- **Default ECUs Cleanup**: Removed default hardcoded mock ECUs (like Engine ECU) from clean project templates.
+
 ## [0.0.9] - 2026-06-15
 
 ### Added
