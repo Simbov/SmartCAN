@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.10] - 2026-06-21
+
 ### Added
 - **Teenage Engineering Inspired UI**: Refactored the dashboard and components to present a quiet, high-density industrial catalog style using Canvas Mist background, Steel Gray hairlines, Ink Black typography, zero drop shadows, and sharp 3px chamfers.
 - **Emil Kowalski Micro-Interactions**: Optimized interactive animations and transitions with a snappy `ease-out-expo` transition curve and distinct interactive state behaviors.
