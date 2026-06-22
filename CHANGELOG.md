@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.11] - 2026-06-22
+
 ### Fixed
 - **Top Bar Jitter**: Fixed frames counter layout shifting by formatting it with monospaced numbers (`font-mono` and `tabular-nums`) and setting a stable container width.
 - **DBC Logical Device Association**: Devices can now select and bind to a specific DBC format in the registry, ensuring that frames originating from a device's nodeId are only decoded using its associated DBC or the generic DBC library.
