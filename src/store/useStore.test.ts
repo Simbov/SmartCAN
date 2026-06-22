@@ -255,7 +255,7 @@ describe('Zustand store (CanStore)', () => {
     
     // Add devices for SA=1 and SA=0 to allow DBC decoding
     store.addDevice({ id: 'dev-1', name: 'Engine ECU', nodeId: 1, enabled: true, isSimulated: true });
-    store.addDevice({ id: 'dev-2', name: 'BMS', nodeId: 0, enabled: true, isSimulated: true });
+    store.addDevice({ id: 'dev-2', name: 'BMS', nodeId: 0, enabled: true, isSimulated: true, associatedDbcName: 'Orion BMS Controller' });
 
     // Enable Default J1939 (in case it was disabled) and Orion BMS
     if (!store.dbcRegistry.find(e => e.name === 'Default J1939 Database')?.enabled) {
@@ -557,6 +557,117 @@ BO_ 2364543232 BMS_Status_Custom: 8 BMS
     expect(log.lastChangedTimes?.[0]).toBeGreaterThanOrEqual(initialTimes[0]);
     expect(log.lastChangedTimes?.[1]).toBe(initialTimes[1]);
     expect(log.lastChangedTimes?.[4]).toBeGreaterThanOrEqual(initialTimes[4]);
+  });
+
+  it('should preserve associatedDbcName in reconstructDevices', () => {
+    const store = useStore.getState();
+    store.addDevice({
+      id: 'dev-associated-test',
+      name: 'BMS',
+      nodeId: 2,
+      enabled: true,
+      isSimulated: true,
+      associatedDbcName: 'Orion BMS Controller'
+    });
+
+    const state = useStore.getState();
+    const dev = state.devices.find(d => d.id === 'dev-associated-test');
+    expect(dev).toBeDefined();
+    expect(dev?.associatedDbcName).toBe('Orion BMS Controller');
+  });
+
+  it('should restrict DBC decoding based on device association and generic DBC registry type', () => {
+    const store = useStore.getState();
+    store.clearLogs();
+    
+    // Enable J1939 protocol
+    store.setProtocol('j1939');
+
+    // Add device 'MC' at SA=3 linked to 'Curtis 1239 Motor Controller'
+    store.addDevice({
+      id: 'dev-mc',
+      name: 'MotorController',
+      nodeId: 3,
+      enabled: true,
+      isSimulated: true,
+      associatedDbcName: 'Curtis 1239 Motor Controller'
+    });
+
+    // Make sure we have both 'Default J1939 Database' (generic) and 'Curtis 1239 Motor Controller' (device) enabled
+    // Enable another device DBC, e.g. 'Victron SmartShunt Monitor' (device) which is NOT linked to this device
+    store.toggleDbcInProject('Default J1939 Database'); // should be enabled already, but make sure
+    store.toggleDbcInProject('Curtis 1239 Motor Controller');
+    store.toggleDbcInProject('Victron SmartShunt Monitor');
+
+    // Send a frame matching Motor Controller PGN (Curtis status BO_ 2364540416 is PGN 0xF006)
+    // ID: 0x0CF00603 (Priority 3, PGN 0xF006, SA 3)
+    // MotorRPM is signal in Curtis controller DBC: SG_ MotorRPM : 0|16@1+ (1,0) [0|10000] "rpm" InstrumentPanel
+    store.addLog({
+      timestamp: 100,
+      direction: 'RX',
+      id: 0x0CF00603,
+      dlc: 8,
+      data: new Uint8Array([0x10, 0x27, 0, 0, 0, 0, 0, 0]) // MotorRPM raw 10000 -> 10000 rpm
+    });
+
+    let state = useStore.getState();
+    expect(state.logs.length).toBe(1);
+    expect(state.logs[0].decodedSignals?.MotorRPM).toBe(10000);
+
+    // Send a frame matching Victron Shunt PGN (Victron status BO_ 2364543744 is PGN 0xF0D0)
+    // ID: 0x0CF0D003 (Priority 3, PGN 0xF0D0, SA 3)
+    // Victron Shunt has SG_ ShuntSOC : 0|16@1+ (0.01,0) [0|100] "%" InstrumentPanel
+    // Since MotorController is SA 3, but is NOT linked to Victron Shunt DBC format,
+    // this frame should NOT be decoded using Victron Shunt DBC (ShuntSOC should be undefined).
+    store.addLog({
+      timestamp: 200,
+      direction: 'RX',
+      id: 0x0CF0D003,
+      dlc: 8,
+      data: new Uint8Array([0x10, 0x27, 0, 0, 0, 0, 0, 0])
+    });
+
+    state = useStore.getState();
+    expect(state.logs.length).toBe(2);
+    expect(state.logs[1].decodedSignals?.ShuntSOC).toBeUndefined();
+  });
+
+  it('should rebuild plotPoints from logs in togglePlotSignal', () => {
+    const store = useStore.getState();
+    store.clearLogs();
+    
+    // Add device for SA=1 to allow decoding
+    store.addDevice({
+      id: 'dev-1',
+      name: 'Engine ECU',
+      nodeId: 1,
+      enabled: true,
+      isSimulated: true
+    });
+
+    // Populate logs with frame that contains EngineSpeed (EEC1: 0x0CF00401)
+    store.addLog({
+      timestamp: 100,
+      direction: 'RX',
+      id: 0x0CF00401,
+      dlc: 8,
+      data: new Uint8Array([0, 0, 0, 0x00, 0x32, 0, 0, 0]) // RPM raw 12800 -> 1600
+    });
+
+    let state = useStore.getState();
+    expect(state.logs.length).toBe(1);
+    // plotPoints should be empty because 'EngineSpeed' was not in plotSignals
+    expect(state.plotPoints.length).toBe(0);
+
+    // Now toggle plot signal for EngineSpeed
+    store.togglePlotSignal('EngineSpeed');
+
+    state = useStore.getState();
+    expect(state.plotSignals).toContain('EngineSpeed');
+    // plotPoints should now be rebuilt and contain 1 entry
+    expect(state.plotPoints.length).toBe(1);
+    expect(state.plotPoints[0].timestamp).toBe(100);
+    expect(state.plotPoints[0].values.EngineSpeed).toBe(1600);
   });
 });
 

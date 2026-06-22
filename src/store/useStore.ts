@@ -33,6 +33,7 @@ export interface CanDevice {
   enabled: boolean;
   isSimulated: boolean;
   mimicDbcNode?: string; // DBC Node Name to mimic
+  associatedDbcName?: string; // Associated DBC format
   customMessages: Array<{
     id: number;
     name: string;
@@ -247,6 +248,7 @@ function reconstructDevices(devices: any[]): CanDevice[] {
     enabled: d.enabled !== false,
     isSimulated: d.isSimulated !== false,
     mimicDbcNode: d.mimicDbcNode,
+    associatedDbcName: d.associatedDbcName,
     customMessages: Array.isArray(d.customMessages)
       ? d.customMessages.map((msg: any) => {
           const dlc = Number(msg.dlc) || 8;
@@ -1327,12 +1329,24 @@ export const useStore = create<CanStore>((set, get) => {
       let msgName = state.projectSettings.messageNameOverrides[frame.id] || '';
 
       // Try decoding across ALL enabled DBCs
-      for (const parsedDbc of Object.values(state.dbcs)) {
+      for (const [dbcName, parsedDbc] of Object.entries(state.dbcs)) {
         if (state.protocol === 'j1939') {
           const frameDetails = parseJ1939Id(frame.id);
           
-          // Only want DBC's to apply after node at that SA is defined in logical devices.
-          if (!state.devices.some(dev => dev.nodeId === frameDetails.sa)) {
+          // Only want DBC's to apply after node at that SA is defined and enabled in logical devices.
+          const matchingDev = state.devices.find(dev => dev.nodeId === frameDetails.sa && dev.enabled);
+          if (!matchingDev) {
+            continue;
+          }
+
+          // Check if this DBC is allowed:
+          // 1. Is it the device's associated DBC?
+          // 2. Is it a generic DBC?
+          const registryEntry = state.dbcRegistry.find(r => r.name === dbcName);
+          const isGeneric = registryEntry?.type === 'generic';
+          const isAssociated = matchingDev.associatedDbcName === dbcName;
+
+          if (!isGeneric && !isAssociated) {
             continue;
           }
 
@@ -1355,8 +1369,18 @@ export const useStore = create<CanStore>((set, get) => {
           // CANopen ID direct matching
           const frameNodeId = frame.id & 0x7F;
           
-          // Only want DBC's to apply after node at that SA is defined in logical devices.
-          if (!state.devices.some(dev => dev.nodeId === frameNodeId)) {
+          // Only want DBC's to apply after node at that NodeID is defined and enabled in logical devices.
+          const matchingDev = state.devices.find(dev => dev.nodeId === frameNodeId && dev.enabled);
+          if (!matchingDev) {
+            continue;
+          }
+
+          // Check if this DBC is allowed:
+          const registryEntry = state.dbcRegistry.find(r => r.name === dbcName);
+          const isGeneric = registryEntry?.type === 'generic';
+          const isAssociated = matchingDev.associatedDbcName === dbcName;
+
+          if (!isGeneric && !isAssociated) {
             continue;
           }
 
@@ -1440,8 +1464,8 @@ export const useStore = create<CanStore>((set, get) => {
         if (addedAny) {
           set(state => {
             const nextPlot = [...state.plotPoints, { timestamp, values: plotValues }];
-            // Limit plotter history to 100 entries for safety/performance
-            if (nextPlot.length > 100) nextPlot.shift();
+            // Limit plotter history to 1000 entries for safety/performance
+            if (nextPlot.length > 1000) nextPlot.shift();
             return { plotPoints: nextPlot };
           });
         }
@@ -1717,9 +1741,34 @@ export const useStore = create<CanStore>((set, get) => {
       const nextSignals = isAdding
         ? [...state.plotSignals, sigName]
         : state.plotSignals.filter(s => s !== sigName);
+
+      // Rebuild plotPoints from the current logs history
+      const rebuiltPoints: Array<{ timestamp: number; values: Record<string, number> }> = [];
+      state.logs.forEach(log => {
+        if (log.decodedSignals) {
+          const plotValues: Record<string, number> = {};
+          let hasAny = false;
+          nextSignals.forEach(sName => {
+            if (log.decodedSignals && log.decodedSignals[sName] !== undefined) {
+              plotValues[sName] = log.decodedSignals[sName];
+              hasAny = true;
+            }
+          });
+          if (hasAny) {
+            rebuiltPoints.push({
+              timestamp: log.timestamp,
+              values: plotValues
+            });
+          }
+        }
+      });
+
+      // Limit rebuilt points to 1000 items
+      const finalPlotPoints = rebuiltPoints.slice(-1000);
+
       return {
         plotSignals: nextSignals,
-        plotPoints: [], // Reset plotter display to redraw correctly
+        plotPoints: finalPlotPoints,
         visiblePanels: {
           ...state.visiblePanels,
           livePlotter: isAdding ? true : state.visiblePanels.livePlotter

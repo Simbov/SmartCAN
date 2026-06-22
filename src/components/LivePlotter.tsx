@@ -205,8 +205,10 @@ export const LivePlotter: React.FC = () => {
       ) : plotPoints.length < 2 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center p-4 border border-dashed border-[var(--border-color)] rounded-lg bg-[var(--bg-card-sub)]">
           <div className="animate-pulse flex flex-col items-center">
-            <span className="text-xs text-[var(--text-muted)] font-semibold mb-1">Awaiting signal transmission...</span>
-            <span className="text-[10px] text-[var(--text-muted)]">Ensure the simulation or periodic transmitter is writing frames.</span>
+            <span className="text-xs text-[var(--text-muted)] font-semibold mb-1">Awaiting signal data...</span>
+            <span className="text-[10px] text-[var(--text-muted)] max-w-[280px]">
+              Ensure the simulation or periodic transmitter is writing frames, or import a CAN dump containing the selected signals.
+            </span>
           </div>
         </div>
       ) : (

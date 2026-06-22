@@ -18,12 +18,14 @@ export const DeviceManager: React.FC = () => {
     activeDbcName,
     protocol,
     projectSettings,
-    toggleMessageDisabledInProject
+    toggleMessageDisabledInProject,
+    dbcRegistry
   } = useStore();
 
   const [activeTab, setActiveTab] = useState<'devices' | 'project-ids'>('devices');
   const [newDevName, setNewDevName] = useState('');
   const [newDevNodeId, setNewDevNodeId] = useState<number>(10);
+  const [newDevDbc, setNewDevDbc] = useState('');
   
   // Custom message creation form state
   const [targetDevId, setTargetDevId] = useState<string | null>(null);
@@ -90,10 +92,12 @@ export const DeviceManager: React.FC = () => {
       name: newDevName,
       nodeId: newDevNodeId,
       enabled: true,
-      isSimulated: true
+      isSimulated: true,
+      associatedDbcName: newDevDbc || undefined
     });
 
     setNewDevName('');
+    setNewDevDbc('');
     // increment for convenience
     setNewDevNodeId(prev => prev + 1);
   };
@@ -384,6 +388,20 @@ export const DeviceManager: React.FC = () => {
                 className="glass-input text-xs w-full"
               />
             </div>
+            <div className="mb-2">
+              <select
+                value={newDevDbc}
+                onChange={e => setNewDevDbc(e.target.value)}
+                className="glass-input text-xs w-full cursor-pointer"
+              >
+                <option value="">-- Associated DBC Format (Optional) --</option>
+                {dbcRegistry.map(entry => (
+                  <option key={entry.name} value={entry.name}>
+                    {entry.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <button
               type="submit"
               className="w-full flex items-center justify-center gap-1 bg-[var(--bg-input)] hover:bg-[var(--bg-card)] border border-[var(--border-color)] rounded py-1.5 text-xs text-[var(--text-color)] transition-all font-semibold"
@@ -444,6 +462,23 @@ export const DeviceManager: React.FC = () => {
                       />
                       <span>Active (False CAN)</span>
                     </label>
+                  </div>
+
+                  {/* Device DBC Binding Dropdown */}
+                  <div className="flex items-center justify-between gap-2 text-[10px] text-[var(--text-muted)] bg-[var(--bg-input)] p-1.5 rounded border border-[var(--border-sub)]">
+                    <span>DBC Format:</span>
+                    <select
+                      value={dev.associatedDbcName || ''}
+                      onChange={e => updateDevice(dev.id, { associatedDbcName: e.target.value || undefined })}
+                      className="glass-input text-[10px] px-1 py-0.5 max-w-[150px] pr-4 font-semibold"
+                    >
+                      <option value="">-- None (Generic Only) --</option>
+                      {dbcRegistry.map(entry => (
+                        <option key={entry.name} value={entry.name}>
+                          {entry.name} {entry.enabled ? '' : '(Disabled)'}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   {dev.isSimulated && availableDbcNodes.length > 0 && (

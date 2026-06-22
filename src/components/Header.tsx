@@ -206,7 +206,7 @@ export const Header: React.FC = () => {
         {/* Log Stats */}
         <div className="flex items-center h-8 gap-1.5 px-2.5 lg:px-3 text-xs text-[var(--text-muted)] bg-[var(--bg-input)] border border-[var(--border-color)] rounded-[3px] shrink-0">
           <Activity className={`w-3.5 h-3.5 ${isConnected ? 'text-cyber-accent animate-pulse' : 'text-gray-500'}`} />
-          <span><span className="hidden xl:inline">Frames: </span><strong className="text-[var(--text-color)] font-normal">{totalFramesReceived}</strong></span>
+          <span><span className="hidden xl:inline">Frames: </span><strong className="text-[var(--text-color)] font-normal font-mono tabular-nums inline-block min-w-[2.5rem] text-right">{totalFramesReceived}</strong></span>
         </div>
 
         {/* Clear Logs */}
