@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.12] - 2026-06-23
+
 ### Added
 - **Batch Log Traffic Insertion**: Introduced a new `addLogsBatch` action to process and log multiple CAN frames simultaneously, resolving the performance lag/freeze when importing massive CAN dumps.
 
