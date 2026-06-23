@@ -26,6 +26,20 @@ export const LivePlotter: React.FC = () => {
 
   const displayedPoints = isPaused ? pausedPoints : plotPoints;
 
+  const formatXVal = (valMs: number, rangeMs: number): string => {
+    const valSec = valMs / 1000;
+    const rangeSec = rangeMs / 1000;
+    if (rangeSec < 0.1) return `${valSec.toFixed(3)}s`;
+    if (rangeSec < 1) return `${valSec.toFixed(2)}s`;
+    return `${valSec.toFixed(1)}s`;
+  };
+
+  const formatYVal = (val: number, range: number): string => {
+    if (range < 0.1) return val.toFixed(3).replace(/\.?0+$/, '');
+    if (range < 1) return val.toFixed(2).replace(/\.?0+$/, '');
+    return val.toFixed(1).replace(/\.?0+$/, '');
+  };
+
   // Width and height of the SVG viewport
   const width = 600;
   const height = 240;
@@ -86,11 +100,18 @@ export const LivePlotter: React.FC = () => {
     let maxX: number;
     if (plotXWindow === 'all') {
       const times = pointsFilteredByX.map(p => p.timestamp);
-      minX = times[0];
-      maxX = times[times.length - 1];
+      minX = times[0] ?? 0;
+      maxX = times[times.length - 1] ?? (minX + 1000);
+      if (minX === maxX) {
+        maxX = minX + 1000;
+      }
     } else {
-      maxX = displayedPoints[displayedPoints.length - 1]?.timestamp ?? 0;
-      minX = maxX - (plotXWindow as number) * 1000;
+      const lastPoint = displayedPoints[displayedPoints.length - 1];
+      const lastT = lastPoint ? lastPoint.timestamp : 0;
+      const windowMs = (plotXWindow as number) * 1000;
+      
+      minX = Math.max(0, lastT - windowMs);
+      maxX = Math.max(windowMs, lastT);
     }
     const dx = maxX - minX || 1;
 
@@ -345,7 +366,7 @@ export const LivePlotter: React.FC = () => {
                       fill="currentColor"
                       className="font-semibold"
                     >
-                      {val.toFixed(1).replace(/\.?0+$/, '')}
+                      {formatYVal(val, chartDetails.maxY - chartDetails.minY)}
                     </text>
                   </g>
                 );
@@ -372,7 +393,7 @@ export const LivePlotter: React.FC = () => {
                       fill="currentColor"
                       className="font-semibold"
                     >
-                      {(val / 1000).toFixed(1)}s
+                      {formatXVal(val, chartDetails.maxX - chartDetails.minX)}
                     </text>
                   </g>
                 );

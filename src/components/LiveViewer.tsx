@@ -26,7 +26,8 @@ export const LiveViewer: React.FC = () => {
     setLiveViewerMode: setViewMode,
     trackedBits,
     toggleTrackBit,
-    showToast
+    showToast,
+    addLogsBatch
   } = useStore();
 
   const [filterText, setFilterText] = useState('');
@@ -111,7 +112,7 @@ export const LiveViewer: React.FC = () => {
   };
 
   const getNickname = (nodeId: number): string => {
-    const dev = devices.find((d) => d.nodeId === nodeId);
+    const dev = devices.find((d) => d.nodeId === nodeId && d.enabled);
     return dev ? dev.name : `Node ${nodeId}`;
   };
 
@@ -446,8 +447,7 @@ export const LiveViewer: React.FC = () => {
       tempLogs.push({ timestamp, direction: 'RX', id, dlc: dataBytes.length, data: dataBytes });
     }
     tempLogs.sort((a, b) => a.timestamp - b.timestamp);
-    const store = useStore.getState();
-    tempLogs.forEach((log) => store.addLog(log));
+    addLogsBatch(tempLogs);
   };
 
   return (

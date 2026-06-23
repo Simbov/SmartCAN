@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Batch Log Traffic Insertion**: Introduced a new `addLogsBatch` action to process and log multiple CAN frames simultaneously, resolving the performance lag/freeze when importing massive CAN dumps.
+
+### Fixed
+- **Retroactive DBC and Device Association**: Automatically re-decodes and re-labels all historical log traffic in the viewer when devices are enabled/disabled or new DBC mappings are associated, eliminating the need to re-upload files.
+- **Source Device Disabled Fallback**: Correctly falls back to `Node ${nodeId}` for disabled nodes rather than displaying the node's custom label in the live monitor.
+- **Plotter Time Scaling & Ticks**: Refactored real-time line plotter bounds to prevent negative X-axis time scales and dynamically select X/Y tick label decimal precision to ensure distinct, non-overlapping labels.
+
 ## [0.0.11] - 2026-06-22
 
 ### Fixed

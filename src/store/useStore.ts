@@ -200,6 +200,7 @@ interface CanStore {
   
   // Log Actions
   addLog: (frame: Omit<CanLog, 'delta' | 'decodedSignals' | 'name'>) => void;
+  addLogsBatch: (frames: Array<Omit<CanLog, 'delta' | 'decodedSignals' | 'name'>>) => void;
   clearLogs: () => void;
   setPausedLogs: (paused: boolean) => void;
   importLogsCsv: (csvContent: string) => void;
@@ -505,24 +506,118 @@ export const useStore = create<CanStore>((set, get) => {
   // Keep track of last timestamps per ID for delta calculations
   const lastTimestampsById: Record<number, number> = {};
 
+  const redecodeLogs = (
+    logs: CanLog[],
+    dbcs: Record<string, DbcDatabase>,
+    protocol: 'canopen' | 'j1939',
+    devices: CanDevice[],
+    dbcRegistry: DbcRegistryEntry[],
+    projectSettings: ProjectSettings,
+    trackedBits: Array<{ msgId: number; byteIdx: number; bitIdx: number }>
+  ): CanLog[] => {
+    return logs.map(log => {
+      let decodedSignals: Record<string, number> | null = null;
+      let msgName = projectSettings.messageNameOverrides[log.id] || '';
+
+      for (const [dbcName, parsedDbc] of Object.entries(dbcs)) {
+        if (protocol === 'j1939') {
+          const frameDetails = parseJ1939Id(log.id);
+          const matchingDev = devices.find(dev => dev.nodeId === frameDetails.sa && dev.enabled);
+          if (!matchingDev) continue;
+
+          const registryEntry = dbcRegistry.find(r => r.name === dbcName);
+          const isGeneric = registryEntry?.type === 'generic';
+          const isAssociated = matchingDev.associatedDbcName === dbcName;
+
+          if (!isGeneric && !isAssociated) continue;
+
+          const matchedMessage = Object.values(parsedDbc.messages).find(msg => {
+            const dbMsgDetails = parseJ1939Id(msg.id);
+            return dbMsgDetails.pgn === frameDetails.pgn;
+          });
+          
+          if (matchedMessage) {
+            if (!msgName) msgName = matchedMessage.name;
+            const signals = decodeFrame(matchedMessage.id, log.data, parsedDbc);
+            if (signals) {
+              decodedSignals = { ...(decodedSignals || {}), ...signals };
+            }
+          }
+        } else {
+          const frameNodeId = log.id & 0x7F;
+          const matchingDev = devices.find(dev => dev.nodeId === frameNodeId && dev.enabled);
+          if (!matchingDev) continue;
+
+          const registryEntry = dbcRegistry.find(r => r.name === dbcName);
+          const isGeneric = registryEntry?.type === 'generic';
+          const isAssociated = matchingDev.associatedDbcName === dbcName;
+
+          if (!isGeneric && !isAssociated) continue;
+
+          const matchedMessage = parsedDbc.messages[log.id];
+          if (matchedMessage) {
+            if (!msgName) msgName = matchedMessage.name;
+            const signals = decodeFrame(log.id, log.data, parsedDbc);
+            if (signals) {
+              decodedSignals = { ...(decodedSignals || {}), ...signals };
+            }
+          }
+        }
+      }
+
+      if (!msgName) {
+        if (protocol === 'j1939') {
+          const frameDetails = parseJ1939Id(log.id);
+          msgName = `PGN ${frameDetails.pgn.toString(16).toUpperCase()} (SA:${frameDetails.sa})`;
+        } else {
+          const type = log.id & 0x780;
+          const nid = log.id & 0x07F;
+          if (type === 0x700) msgName = `Heartbeat Node ${nid}`;
+          else if (type === 0x600) msgName = `SDO Rx Node ${nid}`;
+          else if (type === 0x580) msgName = `SDO Tx Node ${nid}`;
+          else if (log.id === 0x000) msgName = 'NMT Master Command';
+          else msgName = `COB-ID 0x${log.id.toString(16).toUpperCase()}`;
+        }
+      }
+
+      const matchingTracked = trackedBits.filter(tb => tb.msgId === log.id);
+      if (matchingTracked.length > 0) {
+        if (!decodedSignals) decodedSignals = {};
+        matchingTracked.forEach(tb => {
+          const byteVal = log.data[tb.byteIdx] ?? 0;
+          const bitVal = (byteVal >> tb.bitIdx) & 1;
+          const name = `0x${log.id.toString(16).toUpperCase()}_B${tb.byteIdx}_b${tb.bitIdx}`;
+          decodedSignals![name] = bitVal;
+        });
+      }
+
+      if (projectSettings.messageNameOverrides[log.id]) {
+        msgName = projectSettings.messageNameOverrides[log.id];
+      }
+
+      return {
+        ...log,
+        name: msgName,
+        decodedSignals
+      };
+    });
+  };
+
   const syncStoreState = (state: CanStore) => {
     const activeProj = state.projects.find((p) => p.id === state.activeProjectId);
     if (!activeProj) return {};
 
-    // Keep active project fields synced with root
     activeProj.protocol = state.protocol;
     activeProj.baudRate = state.baudRate;
     activeProj.devices = state.devices;
     activeProj.disabledMessageIds = state.projectSettings.disabledMessageIds;
     activeProj.messageNameOverrides = state.projectSettings.messageNameOverrides;
 
-    // Update dbcRegistry entry.enabled flags based on activeProj.enabledDbcNames
     const updatedRegistry = state.dbcRegistry.map((entry) => ({
       ...entry,
       enabled: activeProj.enabledDbcNames.includes(entry.name)
     }));
 
-    // Parse enabled DBCs and put them in state.dbcs
     const parsedDbcs: Record<string, DbcDatabase> = {};
     updatedRegistry.forEach((entry) => {
       if (entry.enabled) {
@@ -534,10 +629,36 @@ export const useStore = create<CanStore>((set, get) => {
       }
     });
 
+    const redecodedLogs = redecodeLogs(
+      state.logs,
+      parsedDbcs,
+      state.protocol,
+      state.devices,
+      updatedRegistry,
+      state.projectSettings,
+      state.trackedBits
+    );
+
+    const redecodedFixedLogs: Record<number, CanLog> = {};
+    Object.entries(state.fixedLogs).forEach(([idStr, log]) => {
+      const id = Number(idStr);
+      redecodedFixedLogs[id] = redecodeLogs(
+        [log],
+        parsedDbcs,
+        state.protocol,
+        state.devices,
+        updatedRegistry,
+        state.projectSettings,
+        state.trackedBits
+      )[0];
+    });
+
     return {
       projects: [...state.projects],
       dbcRegistry: updatedRegistry,
-      dbcs: parsedDbcs
+      dbcs: parsedDbcs,
+      logs: redecodedLogs,
+      fixedLogs: redecodedFixedLogs
     };
   };
 
@@ -1178,10 +1299,16 @@ export const useStore = create<CanStore>((set, get) => {
         nextCanopenNodes[device.nodeId] = createCanopenNode(device.nodeId);
       }
 
-      return { 
-        devices: nextDevices, 
+      const nextState = {
+        ...state,
+        devices: nextDevices,
         projects: [...state.projects],
         canopenNodes: nextCanopenNodes
+      };
+
+      return {
+        ...nextState,
+        ...syncStoreState(nextState)
       };
     }),
 
@@ -1202,10 +1329,16 @@ export const useStore = create<CanStore>((set, get) => {
         }
       }
 
-      return { 
-        devices: nextDevices, 
+      const nextState = {
+        ...state,
+        devices: nextDevices,
         projects: [...state.projects],
         canopenNodes: nextCanopenNodes
+      };
+
+      return {
+        ...nextState,
+        ...syncStoreState(nextState)
       };
     }),
 
@@ -1222,10 +1355,16 @@ export const useStore = create<CanStore>((set, get) => {
         delete nextCanopenNodes[oldDevice.nodeId];
       }
 
-      return { 
-        devices: nextDevices, 
+      const nextState = {
+        ...state,
+        devices: nextDevices,
         projects: [...state.projects],
         canopenNodes: nextCanopenNodes
+      };
+
+      return {
+        ...nextState,
+        ...syncStoreState(nextState)
       };
     }),
 
@@ -1543,6 +1682,206 @@ export const useStore = create<CanStore>((set, get) => {
       });
     },
 
+    addLogsBatch: (frames) => {
+      const state = get();
+      if (state.pausedLogs || state.isEditingLayout) return;
+
+      const activeFrames = frames.filter(f => !state.projectSettings.disabledMessageIds[f.id]);
+      if (activeFrames.length === 0) return;
+
+      const localLastTimestamps = { ...lastTimestampsById };
+      const localFixedLogs = { ...state.fixedLogs };
+      const newLogs: CanLog[] = [];
+
+      activeFrames.forEach(frame => {
+        let timestamp = frame.timestamp;
+        if (state.kvaserStatus === 'physical' && frame.direction === 'RX') {
+          let offset = state.timestampOffset;
+          if (offset === null) {
+            offset = state.simTime - frame.timestamp;
+            set({ timestampOffset: offset });
+          }
+          timestamp = frame.timestamp + offset;
+          set({ lastPhysicalTimestamp: frame.timestamp });
+        }
+
+        const lastT = localLastTimestamps[frame.id] ?? timestamp;
+        const delta = timestamp - lastT;
+        localLastTimestamps[frame.id] = timestamp;
+
+        let decodedSignals: Record<string, number> | null = null;
+        let msgName = state.projectSettings.messageNameOverrides[frame.id] || '';
+
+        for (const [dbcName, parsedDbc] of Object.entries(state.dbcs)) {
+          if (state.protocol === 'j1939') {
+            const frameDetails = parseJ1939Id(frame.id);
+            const matchingDev = state.devices.find(dev => dev.nodeId === frameDetails.sa && dev.enabled);
+            if (!matchingDev) continue;
+
+            const registryEntry = state.dbcRegistry.find(r => r.name === dbcName);
+            const isGeneric = registryEntry?.type === 'generic';
+            const isAssociated = matchingDev.associatedDbcName === dbcName;
+            if (!isGeneric && !isAssociated) continue;
+
+            const matchedMessage = Object.values(parsedDbc.messages).find(msg => {
+              const dbMsgDetails = parseJ1939Id(msg.id);
+              return dbMsgDetails.pgn === frameDetails.pgn;
+            });
+            if (matchedMessage) {
+              if (!msgName) msgName = matchedMessage.name;
+              const signals = decodeFrame(matchedMessage.id, frame.data, parsedDbc);
+              if (signals) decodedSignals = { ...(decodedSignals || {}), ...signals };
+            }
+          } else {
+            const frameNodeId = frame.id & 0x7F;
+            const matchingDev = state.devices.find(dev => dev.nodeId === frameNodeId && dev.enabled);
+            if (!matchingDev) continue;
+
+            const registryEntry = state.dbcRegistry.find(r => r.name === dbcName);
+            const isGeneric = registryEntry?.type === 'generic';
+            const isAssociated = matchingDev.associatedDbcName === dbcName;
+            if (!isGeneric && !isAssociated) continue;
+
+            const matchedMessage = parsedDbc.messages[frame.id];
+            if (matchedMessage) {
+              if (!msgName) msgName = matchedMessage.name;
+              const signals = decodeFrame(frame.id, frame.data, parsedDbc);
+              if (signals) decodedSignals = { ...(decodedSignals || {}), ...signals };
+            }
+          }
+        }
+
+        if (!msgName) {
+          if (state.protocol === 'j1939') {
+            const frameDetails = parseJ1939Id(frame.id);
+            msgName = `PGN ${frameDetails.pgn.toString(16).toUpperCase()} (SA:${frameDetails.sa})`;
+          } else {
+            const type = frame.id & 0x780;
+            const nid = frame.id & 0x07F;
+            if (type === 0x700) msgName = `Heartbeat Node ${nid}`;
+            else if (type === 0x600) msgName = `SDO Rx Node ${nid}`;
+            else if (type === 0x580) msgName = `SDO Tx Node ${nid}`;
+            else if (frame.id === 0x000) msgName = 'NMT Master Command';
+            else msgName = `COB-ID 0x${frame.id.toString(16).toUpperCase()}`;
+          }
+        }
+
+        const matchingTracked = state.trackedBits.filter(tb => tb.msgId === frame.id);
+        if (matchingTracked.length > 0) {
+          if (!decodedSignals) decodedSignals = {};
+          matchingTracked.forEach(tb => {
+            const byteVal = frame.data[tb.byteIdx] ?? 0;
+            const bitVal = (byteVal >> tb.bitIdx) & 1;
+            const name = `0x${frame.id.toString(16).toUpperCase()}_B${tb.byteIdx}_b${tb.bitIdx}`;
+            decodedSignals![name] = bitVal;
+          });
+        }
+
+        if (state.protocol === 'j1939') {
+          const assembled = state.tpReassembler.processFrame(frame.id, frame.data, timestamp);
+          if (assembled) {
+            const longId = buildJ1939Id(7, assembled.pgn, assembled.sa, 255);
+            setTimeout(() => {
+              state.addLog({
+                timestamp,
+                direction: 'RX',
+                id: longId,
+                dlc: assembled.payload.length,
+                data: assembled.payload
+              });
+            }, 0);
+          }
+        }
+
+        if (state.projectSettings.messageNameOverrides[frame.id]) {
+          msgName = state.projectSettings.messageNameOverrides[frame.id];
+        }
+
+        const prevLog = localFixedLogs[frame.id];
+        const len = Math.max(8, frame.data.length);
+        const byteChanges = prevLog?.byteChanges ? [...prevLog.byteChanges] : Array(len).fill(0);
+        const lastChangedTimes = prevLog?.lastChangedTimes ? [...prevLog.lastChangedTimes] : Array(len).fill(0);
+        const minValues = prevLog?.minValues ? [...prevLog.minValues] : Array(len).fill(255);
+        const maxValues = prevLog?.maxValues ? [...prevLog.maxValues] : Array(len).fill(0);
+
+        while (byteChanges.length < len) byteChanges.push(0);
+        while (lastChangedTimes.length < len) lastChangedTimes.push(0);
+        while (minValues.length < len) minValues.push(255);
+        while (maxValues.length < len) maxValues.push(0);
+
+        const now = Date.now();
+        for (let i = 0; i < len; i++) {
+          const val = i < frame.data.length ? frame.data[i] : 0;
+          if (!prevLog) {
+            minValues[i] = val;
+            maxValues[i] = val;
+            lastChangedTimes[i] = now;
+          } else {
+            const prevVal = i < prevLog.data.length ? prevLog.data[i] : 0;
+            if (val !== prevVal) {
+              byteChanges[i] = (byteChanges[i] || 0) + 1;
+              lastChangedTimes[i] = now;
+            }
+            if (val < minValues[i]) minValues[i] = val;
+            if (val > maxValues[i]) maxValues[i] = val;
+          }
+        }
+
+        const newLog: CanLog = {
+          ...frame,
+          timestamp,
+          name: msgName,
+          delta,
+          decodedSignals,
+          byteChanges,
+          lastChangedTimes,
+          minValues,
+          maxValues
+        };
+
+        newLogs.push(newLog);
+        localFixedLogs[frame.id] = newLog;
+      });
+
+      set(state => {
+        const nextLogs = [...state.logs, ...newLogs];
+        const slicedLogs = nextLogs.slice(-1000);
+        
+        Object.assign(lastTimestampsById, localLastTimestamps);
+
+        let nextPlotPoints = [...state.plotPoints];
+        if (state.plotSignals.length > 0) {
+          const rebuiltPoints: PlotPoint[] = [];
+          slicedLogs.forEach(log => {
+            if (log.decodedSignals) {
+              const plotValues: Record<string, number> = {};
+              let hasAny = false;
+              state.plotSignals.forEach(sName => {
+                if (log.decodedSignals && log.decodedSignals[sName] !== undefined) {
+                  plotValues[sName] = log.decodedSignals[sName];
+                  hasAny = true;
+                }
+              });
+              if (hasAny) {
+                rebuiltPoints.push({
+                  timestamp: log.timestamp,
+                  values: plotValues
+                });
+              }
+            }
+          });
+          nextPlotPoints = rebuiltPoints.slice(-1000);
+        }
+
+        return {
+          logs: slicedLogs,
+          fixedLogs: localFixedLogs,
+          totalFramesReceived: state.totalFramesReceived + activeFrames.length,
+          plotPoints: nextPlotPoints
+        };
+      });
+    },
+
     clearLogs: () => {
       Object.keys(lastTimestampsById).forEach(key => delete lastTimestampsById[Number(key)]);
       set({
@@ -1565,7 +1904,6 @@ export const useStore = create<CanStore>((set, get) => {
       const lines = csvContent.split(/\r?\n/);
       if (lines.length < 2) return;
 
-      // Auto-detect delimiter based on the first line (header)
       let delimiter = ',';
       if (lines[0].includes(';')) delimiter = ';';
       else if (lines[0].includes('\t')) delimiter = '\t';
@@ -1573,13 +1911,11 @@ export const useStore = create<CanStore>((set, get) => {
       
       const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase());
 
-      // Locate column indices dynamically
       const timeIdx = headers.findIndex(h => h.includes('time'));
       const dirIdx = headers.findIndex(h => h.includes('dir') || h.includes('flag') || h.includes('flags'));
       const idIdx = headers.findIndex(h => h.includes('id') || h.includes('ident'));
       const dlcIdx = headers.findIndex(h => h.includes('dlc'));
 
-      // Look for data columns: can be Data 0... Data 7, Data(0)... or a single Data column
       const data0Idx = headers.findIndex(h => 
         h.startsWith('data(0)') || 
         h === 'data(0)' || 
@@ -1590,8 +1926,6 @@ export const useStore = create<CanStore>((set, get) => {
       );
       const dataHexIdx = headers.findIndex(h => h.includes('data(hex)') || h === 'data');
 
-      // Setup default fallback indices based on the new release specification:
-      // Time, Channel, id, Flags, DLC, Data 0-7, Counter
       const actualTimeIdx = timeIdx !== -1 ? timeIdx : 0;
       const actualDirIdx = dirIdx !== -1 ? dirIdx : 3;
       const actualIdIdx = idIdx !== -1 ? idIdx : 2;
@@ -1602,7 +1936,6 @@ export const useStore = create<CanStore>((set, get) => {
         if (dataHexIdx !== -1) {
           // Will use dataHexIdx
         } else {
-          // Default to index 5 (which is the 6th column, F, in Time, Channel, id, Flags, DLC, Data 0...)
           dataStartIdx = 5;
         }
       }
@@ -1613,6 +1946,8 @@ export const useStore = create<CanStore>((set, get) => {
         isSeconds = true;
       }
 
+      const tempFrames: Array<Omit<CanLog, 'delta' | 'decodedSignals' | 'name'>> = [];
+
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
@@ -1620,7 +1955,6 @@ export const useStore = create<CanStore>((set, get) => {
         const cols = line.split(delimiter);
         if (cols.length <= Math.max(actualTimeIdx, actualIdIdx)) continue;
 
-        // Parse Time: can be absolute float (seconds/ms) or HH:MM:SS.mmm
         let timestamp = 0;
         const timeStr = cols[actualTimeIdx];
         if (timeStr) {
@@ -1645,7 +1979,6 @@ export const useStore = create<CanStore>((set, get) => {
           }
         }
 
-        // Parse direction from Flags / Dir column
         let direction: 'RX' | 'TX' = 'RX';
         if (cols[actualDirIdx]) {
           const rawDir = cols[actualDirIdx].trim().toUpperCase();
@@ -1654,7 +1987,6 @@ export const useStore = create<CanStore>((set, get) => {
           }
         }
 
-        // Parse CAN ID
         const rawId = cols[actualIdIdx] ? cols[actualIdIdx].trim() : '';
         const id = rawId.toLowerCase().startsWith('0x')
           ? (parseInt(rawId.slice(2), 16) || 0)
@@ -1664,10 +1996,8 @@ export const useStore = create<CanStore>((set, get) => {
           ? (parseInt(rawId, 16) || 0)
           : (parseInt(rawId, 10) || parseInt(rawId, 16) || 0);
 
-        // DLC
         const dlc = cols[actualDlcIdx] ? (parseInt(cols[actualDlcIdx].trim(), 10) || 0) : 0;
 
-        // Parse data bytes (read up to 8 bytes)
         const bytes: number[] = [];
         if (dataStartIdx !== -1 && dataHexIdx === -1) {
           for (let j = 0; j < 8; j++) {
@@ -1685,7 +2015,6 @@ export const useStore = create<CanStore>((set, get) => {
             matchHex.forEach(byte => bytes.push(parseInt(byte, 16)));
           }
         } else {
-          // Fallback: collect trailing columns after actualDlcIdx
           for (let j = actualDlcIdx + 1; j < cols.length; j++) {
             const colVal = cols[j];
             if (colVal !== undefined && colVal.trim() !== '') {
@@ -1699,7 +2028,7 @@ export const useStore = create<CanStore>((set, get) => {
         const dataBytes = new Uint8Array(bytes);
         const actualDlc = Math.max(dlc, dataBytes.length);
 
-        state.addLog({
+        tempFrames.push({
           timestamp,
           direction,
           id,
@@ -1707,6 +2036,8 @@ export const useStore = create<CanStore>((set, get) => {
           data: dataBytes
         });
       }
+
+      state.addLogsBatch(tempFrames);
     },
 
     saveMessageToActiveDbc: (id, name, dlc, sender) => {
@@ -2185,13 +2516,19 @@ export const useStore = create<CanStore>((set, get) => {
           }
         }
 
-        return {
+        const nextState = {
+          ...state,
           trackedBits: nextTracked,
           plotSignals: nextPlotSignals,
           visiblePanels: {
             ...state.visiblePanels,
             livePlotter: true
           }
+        };
+
+        return {
+          ...nextState,
+          ...syncStoreState(nextState)
         };
       });
     },

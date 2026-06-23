@@ -669,5 +669,86 @@ BO_ 2364543232 BMS_Status_Custom: 8 BMS
     expect(state.plotPoints[0].timestamp).toBe(100);
     expect(state.plotPoints[0].values.EngineSpeed).toBe(1600);
   });
+
+  it('should add multiple logs in batch correctly', () => {
+    const store = useStore.getState();
+    store.clearLogs();
+    
+    // Add device for SA=1 to allow decoding
+    store.addDevice({
+      id: 'dev-1',
+      name: 'Engine ECU',
+      nodeId: 1,
+      enabled: true,
+      isSimulated: true
+    });
+
+    const framesToBatch = [
+      {
+        timestamp: 100,
+        direction: 'RX' as const,
+        id: 0x0CF00401,
+        dlc: 8,
+        data: new Uint8Array([0, 0, 0, 0x00, 0x32, 0, 0, 0])
+      },
+      {
+        timestamp: 200,
+        direction: 'RX' as const,
+        id: 0x0CF00401,
+        dlc: 8,
+        data: new Uint8Array([0, 0, 0, 0x00, 0x40, 0, 0, 0])
+      }
+    ];
+
+    store.addLogsBatch(framesToBatch);
+
+    const state = useStore.getState();
+    expect(state.logs.length).toBe(2);
+    expect(state.logs[0].timestamp).toBe(100);
+    expect(state.logs[0].decodedSignals?.EngineSpeed).toBe(1600);
+    expect(state.logs[1].timestamp).toBe(200);
+    expect(state.logs[1].decodedSignals?.EngineSpeed).toBe(2048);
+  });
+
+  it('should retroactively decode and label existing logs when a device is enabled', () => {
+    const store = useStore.getState();
+    store.clearLogs();
+    
+    // 1. Add log before device is added/enabled (SA=1)
+    store.addLog({
+      timestamp: 100,
+      direction: 'RX',
+      id: 0x0CF00401,
+      dlc: 8,
+      data: new Uint8Array([0, 0, 0, 0x00, 0x32, 0, 0, 0])
+    });
+
+    let state = useStore.getState();
+    expect(state.logs.length).toBe(1);
+    // Name should be fallback PGN format, and no decoded signals
+    expect(state.logs[0].name).toContain('PGN F004');
+    expect(state.logs[0].decodedSignals).toBeNull();
+
+    // 2. Add and enable device at SA 1
+    store.addDevice({
+      id: 'dev-1',
+      name: 'Engine ECU',
+      nodeId: 1,
+      enabled: true,
+      isSimulated: true
+    });
+
+    state = useStore.getState();
+    // Log should now be retroactively decoded!
+    expect(state.logs[0].name).toBe('EEC1');
+    expect(state.logs[0].decodedSignals?.EngineSpeed).toBe(1600);
+
+    // 3. Disable device -> should retroactively clear decoding
+    store.updateDevice('dev-1', { enabled: false });
+
+    state = useStore.getState();
+    expect(state.logs[0].name).toContain('PGN F004');
+    expect(state.logs[0].decodedSignals).toBeNull();
+  });
 });
 
